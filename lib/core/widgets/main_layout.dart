@@ -8,7 +8,7 @@ import 'package:gym_system/features/settings/views/settings_screen.dart';
 import 'package:gym_system/core/theme/colors.dart';
 
 class MainLayout extends StatefulWidget {
-  const MainLayout({Key? key}) : super(key: key);
+  const MainLayout({super.key});
 
   @override
   State<MainLayout> createState() => _MainLayoutState();

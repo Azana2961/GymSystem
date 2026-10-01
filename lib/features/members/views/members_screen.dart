@@ -5,7 +5,7 @@ import 'package:gym_system/features/members/models/member_model.dart';
 import 'package:gym_system/core/theme/colors.dart';
 
 class MembersScreen extends StatefulWidget {
-  const MembersScreen({Key? key}) : super(key: key);
+  const MembersScreen({super.key});
 
   @override
   State<MembersScreen> createState() => _MembersScreenState();
