@@ -3,7 +3,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:gym_system/core/theme/colors.dart';
 
 class RevenueChart extends StatelessWidget {
-  const RevenueChart({Key? key}) : super(key: key);
+  const RevenueChart({super.key});
 
   @override
   Widget build(BuildContext context) {

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/colors.dart';
 
 class GeneralSettingsTab extends StatelessWidget {
-  const GeneralSettingsTab({Key? key}) : super(key: key);
+  const GeneralSettingsTab({super.key});
 
   @override
   Widget build(BuildContext context) {

@@ -5,7 +5,7 @@ import 'package:gym_system/core/constants/dummy_data.dart';
 import 'package:gym_system/core/theme/colors.dart';
 
 class TrainersScreen extends StatefulWidget {
-  const TrainersScreen({Key? key}) : super(key: key);
+  const TrainersScreen({super.key});
 
   @override
   State<TrainersScreen> createState() => _TrainersScreenState();

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/colors.dart';
 
 class StaffSettingsTab extends StatelessWidget {
-  const StaffSettingsTab({Key? key}) : super(key: key);
+  const StaffSettingsTab({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -23,25 +23,37 @@ class StaffSettingsTab extends StatelessWidget {
         const SizedBox(height: 24),
         Expanded(
           child: Card(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                DataTable(
-                  headingTextStyle: const TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.bold),
-                  columns: const [
-                    DataColumn(label: Text('Role')),
-                    DataColumn(label: Text('Base Salary')),
-                    DataColumn(label: Text('Commission/Hour')),
-                    DataColumn(label: Text('Actions')),
-                  ],
-                  rows: [
-                    _buildStaffRow('Senior Trainer', '\$4,000/mo', '\$25/hr'),
-                    _buildStaffRow('Junior Trainer', '\$2,500/mo', '\$15/hr'),
-                    _buildStaffRow('Yoga Instructor', '\$3,000/mo', '\$30/class'),
-                    _buildStaffRow('Front Desk', '\$2,200/mo', '-'),
-                  ],
-                ),
-              ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  scrollDirection: Axis.vertical,
+                  padding: const EdgeInsets.all(16),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minWidth: constraints.maxWidth - 32),
+                      child: DataTable(
+                        headingTextStyle: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        columns: const [
+                          DataColumn(label: Text('Role')),
+                          DataColumn(label: Text('Base Salary')),
+                          DataColumn(label: Text('Commission/Hour')),
+                          DataColumn(label: Text('Actions')),
+                        ],
+                        rows: [
+                          _buildStaffRow('Senior Trainer', '\$4,000/mo', '\$25/hr'),
+                          _buildStaffRow('Junior Trainer', '\$2,500/mo', '\$15/hr'),
+                          _buildStaffRow('Yoga Instructor', '\$3,000/mo', '\$30/class'),
+                          _buildStaffRow('Front Desk', '\$2,200/mo', '-'),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         ),
@@ -57,9 +69,16 @@ class StaffSettingsTab extends StatelessWidget {
         DataCell(Text(commission)),
         DataCell(
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(icon: const Icon(Icons.edit, size: 20, color: AppColors.secondary), onPressed: () {}),
-              IconButton(icon: const Icon(Icons.delete, size: 20, color: AppColors.error), onPressed: () {}),
+              IconButton(
+                icon: const Icon(Icons.edit, size: 20, color: AppColors.secondary),
+                onPressed: () {},
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete, size: 20, color: AppColors.error),
+                onPressed: () {},
+              ),
             ],
           ),
         ),

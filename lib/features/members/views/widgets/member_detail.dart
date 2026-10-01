@@ -5,7 +5,7 @@ import 'package:gym_system/core/theme/colors.dart';
 class MemberDetail extends StatelessWidget {
   final MemberModel member;
 
-  const MemberDetail({Key? key, required this.member}) : super(key: key);
+  const MemberDetail({super.key, required this.member});
 
   @override
   Widget build(BuildContext context) {

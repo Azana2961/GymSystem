@@ -5,7 +5,7 @@ import 'widgets/memberships_settings_tab.dart';
 import 'widgets/staff_settings_tab.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({Key? key}) : super(key: key);
+  const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/colors.dart';
 
 class MembershipsSettingsTab extends StatelessWidget {
-  const MembershipsSettingsTab({Key? key}) : super(key: key);
+  const MembershipsSettingsTab({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +53,7 @@ class MembershipsSettingsTab extends StatelessWidget {
                       Text(name, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                       const SizedBox(width: 16),
                       Chip(
-                        backgroundColor: AppColors.primary.withOpacity(0.1),
+                        backgroundColor: AppColors.primary.withValues(alpha: 0.1),
                         label: Text(duration, style: const TextStyle(color: AppColors.primary, fontSize: 12)),
                         side: BorderSide.none,
                       ),

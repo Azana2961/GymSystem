@@ -5,7 +5,11 @@ class Sidebar extends StatefulWidget {
   final int selectedIndex;
   final Function(int) onItemSelected;
 
-  const Sidebar({Key? key, required this.selectedIndex, required this.onItemSelected}) : super(key: key);
+  const Sidebar({
+    super.key,
+    required this.selectedIndex,
+    required this.onItemSelected,
+  });
 
   @override
   State<Sidebar> createState() => _SidebarState();
@@ -17,47 +21,51 @@ class _SidebarState extends State<Sidebar> {
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
       width: _isCollapsed ? 80 : 250,
       color: AppColors.surface,
       clipBehavior: Clip.hardEdge,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SizedBox(height: 24),
+          // Logo & App Name
           Padding(
-            padding: EdgeInsets.symmetric(horizontal: _isCollapsed ? 16 : 24),
-            child: OverflowBox(
-              maxWidth: 250 - (_isCollapsed ? 32 : 48),
-              alignment: Alignment.centerLeft,
-              child: Row(
-                mainAxisAlignment: _isCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
-                children: [
-                  const Icon(Icons.fitness_center, color: AppColors.primary, size: 32),
-                  if (!_isCollapsed) ...[
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'IRON CORE',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.5,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+            padding: EdgeInsets.symmetric(horizontal: _isCollapsed ? 16 : 20),
+            child: Row(
+              mainAxisAlignment: _isCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
+              children: [
+                const Icon(Icons.fitness_center, color: AppColors.primary, size: 30),
+                if (!_isCollapsed) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'IRON CORE',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.5,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ],
+                  ),
                 ],
-              ),
+              ],
             ),
           ),
           const SizedBox(height: 16),
+          // Collapse / Expand toggle button
           Align(
             alignment: _isCollapsed ? Alignment.center : Alignment.centerRight,
             child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: _isCollapsed ? 0 : 16),
+              padding: EdgeInsets.symmetric(horizontal: _isCollapsed ? 0 : 12),
               child: IconButton(
-                icon: Icon(_isCollapsed ? Icons.chevron_right : Icons.chevron_left, color: AppColors.textSecondary),
+                tooltip: _isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar',
+                icon: Icon(
+                  _isCollapsed ? Icons.chevron_right : Icons.chevron_left,
+                  color: AppColors.textSecondary,
+                ),
                 onPressed: () {
                   setState(() {
                     _isCollapsed = !_isCollapsed;
@@ -66,30 +74,82 @@ class _SidebarState extends State<Sidebar> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          _SidebarItem(icon: Icons.dashboard, title: 'Dashboard', index: 0, selectedIndex: widget.selectedIndex, onItemSelected: widget.onItemSelected, isCollapsed: _isCollapsed),
-          _SidebarItem(icon: Icons.people, title: 'Members', index: 1, selectedIndex: widget.selectedIndex, onItemSelected: widget.onItemSelected, isCollapsed: _isCollapsed),
-          _SidebarItem(icon: Icons.sports_kabaddi, title: 'Trainers', index: 2, selectedIndex: widget.selectedIndex, onItemSelected: widget.onItemSelected, isCollapsed: _isCollapsed),
-          _SidebarItem(icon: Icons.bar_chart, title: 'Analytics', index: 3, selectedIndex: widget.selectedIndex, onItemSelected: widget.onItemSelected, isCollapsed: _isCollapsed),
-          _SidebarItem(icon: Icons.settings, title: 'Settings', index: 4, selectedIndex: widget.selectedIndex, onItemSelected: widget.onItemSelected, isCollapsed: _isCollapsed),
+          const SizedBox(height: 12),
+          // Menu Items
+          _SidebarItem(
+            icon: Icons.dashboard,
+            title: 'Dashboard',
+            index: 0,
+            selectedIndex: widget.selectedIndex,
+            onItemSelected: widget.onItemSelected,
+            isCollapsed: _isCollapsed,
+          ),
+          _SidebarItem(
+            icon: Icons.people,
+            title: 'Members',
+            index: 1,
+            selectedIndex: widget.selectedIndex,
+            onItemSelected: widget.onItemSelected,
+            isCollapsed: _isCollapsed,
+          ),
+          _SidebarItem(
+            icon: Icons.sports_kabaddi,
+            title: 'Trainers',
+            index: 2,
+            selectedIndex: widget.selectedIndex,
+            onItemSelected: widget.onItemSelected,
+            isCollapsed: _isCollapsed,
+          ),
+          _SidebarItem(
+            icon: Icons.bar_chart,
+            title: 'Analytics',
+            index: 3,
+            selectedIndex: widget.selectedIndex,
+            onItemSelected: widget.onItemSelected,
+            isCollapsed: _isCollapsed,
+          ),
+          _SidebarItem(
+            icon: Icons.settings,
+            title: 'Settings',
+            index: 4,
+            selectedIndex: widget.selectedIndex,
+            onItemSelected: widget.onItemSelected,
+            isCollapsed: _isCollapsed,
+          ),
           const Spacer(),
+          // User profile at the bottom
           Padding(
-            padding: EdgeInsets.all(_isCollapsed ? 16.0 : 24.0),
+            padding: EdgeInsets.all(_isCollapsed ? 12.0 : 20.0),
             child: Row(
               mainAxisAlignment: _isCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
               children: [
                 const CircleAvatar(
+                  radius: 18,
                   backgroundColor: AppColors.border,
-                  child: Icon(Icons.person, color: AppColors.textPrimary),
+                  child: Icon(Icons.person, color: AppColors.textPrimary, size: 20),
                 ),
                 if (!_isCollapsed) ...[
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('Admin', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
-                        Text('Logout', style: TextStyle(color: AppColors.textSecondary, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        Text(
+                          'Admin',
+                          style: TextStyle(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          'Logout',
+                          style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ],
                     ),
                   ),
@@ -112,36 +172,48 @@ class _SidebarItem extends StatelessWidget {
   final bool isCollapsed;
 
   const _SidebarItem({
-    Key? key,
     required this.icon,
     required this.title,
     required this.index,
     required this.selectedIndex,
     required this.onItemSelected,
     required this.isCollapsed,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
     final isSelected = index == selectedIndex;
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        onTap: () => onItemSelected(index),
-        hoverColor: AppColors.primary.withOpacity(0.05),
-        child: Container(
-          padding: EdgeInsets.symmetric(horizontal: isCollapsed ? 0 : 24, vertical: 16),
-          decoration: BoxDecoration(
-            border: isSelected ? const Border(right: BorderSide(color: AppColors.primary, width: 4)) : null,
-            color: isSelected ? AppColors.primary.withOpacity(0.1) : Colors.transparent,
-          ),
-          child: OverflowBox(
-            maxWidth: 250 - (isCollapsed ? 0 : 48),
-            alignment: Alignment.centerLeft,
+      child: Tooltip(
+        message: isCollapsed ? title : '',
+        waitDuration: const Duration(milliseconds: 400),
+        child: InkWell(
+          onTap: () => onItemSelected(index),
+          hoverColor: AppColors.primary.withValues(alpha: 0.05),
+          child: Container(
+            padding: EdgeInsets.symmetric(
+              horizontal: isCollapsed ? 0 : 20,
+              vertical: 14,
+            ),
+            decoration: BoxDecoration(
+              border: isSelected
+                  ? const Border(right: BorderSide(color: AppColors.primary, width: 4))
+                  : null,
+              color: isSelected
+                  ? AppColors.primary.withValues(alpha: 0.1)
+                  : Colors.transparent,
+            ),
             child: Row(
-              mainAxisAlignment: isCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
+              mainAxisAlignment: isCollapsed
+                  ? MainAxisAlignment.center
+                  : MainAxisAlignment.start,
               children: [
-                Icon(icon, color: isSelected ? AppColors.primary : AppColors.secondary, size: 24),
+                Icon(
+                  icon,
+                  color: isSelected ? AppColors.primary : AppColors.secondary,
+                  size: 24,
+                ),
                 if (!isCollapsed) ...[
                   const SizedBox(width: 16),
                   Expanded(
@@ -150,7 +222,7 @@ class _SidebarItem extends StatelessWidget {
                       style: TextStyle(
                         color: isSelected ? AppColors.primary : AppColors.textSecondary,
                         fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        fontSize: 16,
+                        fontSize: 15,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
