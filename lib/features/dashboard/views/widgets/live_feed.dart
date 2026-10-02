@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:gym_system/features/dashboard/models/attendance_model.dart';
 import 'package:gym_system/core/constants/dummy_data.dart';
 import 'package:gym_system/core/theme/colors.dart';
 
 class LiveFeedWidget extends StatelessWidget {
-  const LiveFeedWidget({Key? key}) : super(key: key);
+  const LiveFeedWidget({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +30,7 @@ class LiveFeedWidget extends StatelessWidget {
                     title: Text(attendance.member.name, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
                     subtitle: Text('${attendance.checkInTime.hour}:${attendance.checkInTime.minute.toString().padLeft(2, '0')} - ID: ${attendance.member.id}'),
                     trailing: Chip(
-                      backgroundColor: isValid ? AppColors.success.withOpacity(0.2) : AppColors.error.withOpacity(0.2),
+                      backgroundColor: isValid ? AppColors.success.withValues(alpha: 0.2) : AppColors.error.withValues(alpha: 0.2),
                       label: Text(isValid ? 'Valid' : 'Invalid', style: TextStyle(color: isValid ? AppColors.success : AppColors.error)),
                       side: BorderSide.none,
                     ),

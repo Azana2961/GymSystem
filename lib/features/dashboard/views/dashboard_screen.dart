@@ -4,12 +4,12 @@ import 'widgets/live_feed.dart';
 import 'package:gym_system/core/theme/colors.dart';
 
 class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({Key? key}) : super(key: key);
+  const DashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(32.0),
+      padding: const EdgeInsets.all(28.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -39,61 +39,70 @@ class DashboardScreen extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 32),
-          GridView.count(
-            crossAxisCount: 4,
-            shrinkWrap: true,
-            crossAxisSpacing: 24,
-            mainAxisSpacing: 24,
-            childAspectRatio: 1.3,
-            physics: const NeverScrollableScrollPhysics(),
-            children: const [
-              KpiCard(
-                title: "Today's Check-ins",
-                value: '142',
-                icon: Icons.login,
-                iconColor: Colors.blueAccent,
-                trend: '+12%',
-                isTrendUp: true,
-              ),
-              KpiCard(
-                title: 'Active Members',
-                value: '840',
-                icon: Icons.people,
-                iconColor: AppColors.primary,
-                trend: '+5%',
-                isTrendUp: true,
-              ),
-              KpiCard(
-                title: 'Fees Collected',
-                value: '\$12,450',
-                icon: Icons.attach_money,
-                iconColor: AppColors.success,
-                trend: '+18%',
-                isTrendUp: true,
-              ),
-              KpiCard(
-                title: 'Pending Dues',
-                value: '\$3,200',
-                icon: Icons.warning_amber_rounded,
-                iconColor: AppColors.warning,
-                trend: '-2%',
-                isTrendUp: false,
-              ),
-            ],
+          const SizedBox(height: 24),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isNarrow = constraints.maxWidth < 950;
+              return GridView.count(
+                crossAxisCount: isNarrow ? 2 : 4,
+                shrinkWrap: true,
+                crossAxisSpacing: 20,
+                mainAxisSpacing: 20,
+                childAspectRatio: isNarrow ? 2.0 : 1.6,
+                physics: const NeverScrollableScrollPhysics(),
+                children: const [
+                  KpiCard(
+                    title: "Today's Check-ins",
+                    value: '142',
+                    icon: Icons.login,
+                    iconColor: Colors.blueAccent,
+                    trend: '+12%',
+                    isTrendUp: true,
+                  ),
+                  KpiCard(
+                    title: 'Active Members',
+                    value: '840',
+                    icon: Icons.people,
+                    iconColor: AppColors.primary,
+                    trend: '+5%',
+                    isTrendUp: true,
+                  ),
+                  KpiCard(
+                    title: 'Fees Collected',
+                    value: '\$12,450',
+                    icon: Icons.attach_money,
+                    iconColor: AppColors.success,
+                    trend: '+18%',
+                    isTrendUp: true,
+                  ),
+                  KpiCard(
+                    title: 'Pending Dues',
+                    value: '\$3,200',
+                    icon: Icons.warning_amber_rounded,
+                    iconColor: AppColors.warning,
+                    trend: '-2%',
+                    isTrendUp: false,
+                  ),
+                ],
+              );
+            },
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 24),
           const Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(flex: 2, child: LiveFeedWidget()),
-                SizedBox(width: 24),
+                SizedBox(width: 20),
                 Expanded(
                   flex: 1,
                   child: Card(
                     child: Center(
-                      child: Text('Upcoming Classes Widget\n(Placeholder)', textAlign: TextAlign.center, style: TextStyle(color: AppColors.textSecondary)),
+                      child: Text(
+                        'Upcoming Classes Widget\n(Placeholder)',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.textSecondary),
+                      ),
                     ),
                   ),
                 ),

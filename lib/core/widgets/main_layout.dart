@@ -4,10 +4,11 @@ import 'package:gym_system/features/dashboard/views/dashboard_screen.dart';
 import 'package:gym_system/features/members/views/members_screen.dart';
 import 'package:gym_system/features/trainers/views/trainers_screen.dart';
 import 'package:gym_system/features/analytics/views/analytics_screen.dart';
+import 'package:gym_system/features/settings/views/settings_screen.dart';
 import 'package:gym_system/core/theme/colors.dart';
 
 class MainLayout extends StatefulWidget {
-  const MainLayout({Key? key}) : super(key: key);
+  const MainLayout({super.key});
 
   @override
   State<MainLayout> createState() => _MainLayoutState();
@@ -21,6 +22,7 @@ class _MainLayoutState extends State<MainLayout> {
     const MembersScreen(),
     const TrainersScreen(),
     const AnalyticsScreen(),
+    const SettingsScreen(),
   ];
 
   @override
