@@ -77,38 +77,28 @@ class _TrainersScreenState extends State<TrainersScreen> {
   }
 
   void _selectTrainer(_Trainer trainer) {
-    final wide = MediaQuery.sizeOf(context).width >= 1200;
-    if (wide) {
-      setState(() => _selectedTrainer = trainer);
-    } else {
-      showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (_) => Padding(
-          padding: const EdgeInsets.all(16),
-          child: FractionallySizedBox(
-            heightFactor: 0.9,
-            child: TrainerDetailPanel(
-              trainerName: trainer.name,
-              specialty: trainer.specialty,
-              isClockedIn: trainer.isClockedIn,
-              avatarUrl: trainer.avatarUrl,
-              shiftTime: trainer.shiftTime,
-              members: trainer.members,
-              onClose: () => Navigator.pop(context),
-            ),
-          ),
-        ),
-      );
-    }
+    setState(() => _selectedTrainer = trainer);
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_selectedTrainer != null) {
+      return Padding(
+        padding: const EdgeInsets.all(28.0),
+        child: TrainerDetailPanel(
+          trainerName: _selectedTrainer!.name,
+          specialty: _selectedTrainer!.specialty,
+          isClockedIn: _selectedTrainer!.isClockedIn,
+          avatarUrl: _selectedTrainer!.avatarUrl,
+          shiftTime: _selectedTrainer!.shiftTime,
+          members: _selectedTrainer!.members,
+          onClose: () => setState(() => _selectedTrainer = null),
+        ),
+      );
+    }
+
     final clockedIn    = _dummyTrainers.where((t) => t.isClockedIn).length;
     final totalClients = _dummyTrainers.fold<int>(0, (s, t) => s + t.clientCount);
-    final isWide = MediaQuery.sizeOf(context).width >= 1200;
 
     return Padding(
       padding: const EdgeInsets.all(28.0),
@@ -130,31 +120,9 @@ class _TrainersScreenState extends State<TrainersScreen> {
           ),
           const SizedBox(height: 16),
           Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: _isGridView
-                      ? _TrainerGrid(trainers: _filtered, onTrainerTap: _selectTrainer)
-                      : _TrainerTable(trainers: _filtered, onTrainerTap: _selectTrainer),
-                ),
-                if (_selectedTrainer != null && isWide) ...[
-                  const SizedBox(width: 20),
-                  SizedBox(
-                    width: 400,
-                    child: TrainerDetailPanel(
-                      trainerName: _selectedTrainer!.name,
-                      specialty: _selectedTrainer!.specialty,
-                      isClockedIn: _selectedTrainer!.isClockedIn,
-                      avatarUrl: _selectedTrainer!.avatarUrl,
-                      shiftTime: _selectedTrainer!.shiftTime,
-                      members: _selectedTrainer!.members,
-                      onClose: () => setState(() => _selectedTrainer = null),
-                    ),
-                  ),
-                ],
-              ],
-            ),
+            child: _isGridView
+                ? _TrainerGrid(trainers: _filtered, onTrainerTap: _selectTrainer)
+                : _TrainerTable(trainers: _filtered, onTrainerTap: _selectTrainer),
           ),
         ],
       ),

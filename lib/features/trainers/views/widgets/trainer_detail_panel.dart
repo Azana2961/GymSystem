@@ -104,16 +104,22 @@ class _TrainerDetailPanelState extends State<TrainerDetailPanel> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Stack(
-                        children: [
-                          CircleAvatar(
-                            radius: 30,
-                            backgroundColor: AppColors.border,
-                            backgroundImage: NetworkImage(widget.avatarUrl),
-                            onBackgroundImageError: (_, __) {},
-                          ),
+Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back, size: 20),
+                      color: AppColors.textSecondary,
+                      tooltip: 'Back to trainers',
+                      onPressed: widget.onClose,
+                    ),
+                    Stack(
+                      children: [
+                        CircleAvatar(
+                          radius: 30,
+                          backgroundColor: AppColors.border,
+                          backgroundImage: NetworkImage(widget.avatarUrl),
+                          onBackgroundImageError: (_, __) {},
+                        ),
                         Positioned(
                           bottom: 0,
                           right: 0,
@@ -307,16 +313,29 @@ class _TrainerDetailPanelState extends State<TrainerDetailPanel> {
                       textAlign: TextAlign.center,
                     ),
                   )
-                : Column(
-                    children: [
-                      for (var i = 0; i < members.length; i++) ...[
-                        _MemberRow(
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      final columns = constraints.maxWidth >= 1100
+                          ? 3
+                          : constraints.maxWidth >= 700
+                              ? 2
+                              : 1;
+                      return GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: columns,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                          mainAxisExtent: 78,
+                        ),
+                        itemCount: members.length,
+                        itemBuilder: (_, i) => _MemberRow(
                           member: members[i],
                           onTap: () => _openMember(members[i]),
                         ),
-                        if (i < members.length - 1) const SizedBox(height: 8),
-                      ],
-                    ],
+                      );
+                    },
                   ),
           ),
           ],
