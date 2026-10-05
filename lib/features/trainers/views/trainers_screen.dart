@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:gym_system/core/theme/colors.dart';
+import 'package:gym_system/core/constants/dummy_data.dart';
+import 'package:gym_system/features/members/models/member_model.dart';
+import 'package:gym_system/features/trainers/views/widgets/trainer_detail_panel.dart';
 
 // ---------------------------------------------------------------------------
 // Enriched local Trainer model (self-contained)
@@ -10,7 +13,6 @@ class _Trainer {
   final String specialty;
   final bool isClockedIn;
   final String avatarUrl;
-  final int clientCount;
   final String shiftTime;
 
   const _Trainer({
@@ -19,23 +21,26 @@ class _Trainer {
     required this.specialty,
     required this.isClockedIn,
     required this.avatarUrl,
-    required this.clientCount,
     required this.shiftTime,
   });
+
+  List<MemberModel> get members => DummyData.membersForTrainer(id);
+
+  int get clientCount => members.length;
 }
 
 // ---------------------------------------------------------------------------
 // Dummy Data
 // ---------------------------------------------------------------------------
 final List<_Trainer> _dummyTrainers = [
-  const _Trainer(id: 'T001', name: 'Chris Evans',        specialty: 'Bodybuilding',      isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=1', clientCount: 22, shiftTime: '07:00 AM – 03:00 PM'),
-  const _Trainer(id: 'T002', name: 'Scarlett Johansson', specialty: 'Yoga & Flexibility', isClockedIn: false, avatarUrl: 'https://i.pravatar.cc/150?u=2', clientCount: 18, shiftTime: '10:00 AM – 06:00 PM'),
-  const _Trainer(id: 'T003', name: 'Dwayne Johnson',     specialty: 'Powerlifting',       isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=3', clientCount: 30, shiftTime: '06:00 AM – 02:00 PM'),
-  const _Trainer(id: 'T004', name: 'Gal Gadot',          specialty: 'Cardio & HIIT',      isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=4', clientCount: 25, shiftTime: '08:00 AM – 04:00 PM'),
-  const _Trainer(id: 'T005', name: 'Jason Momoa',        specialty: 'Powerlifting',       isClockedIn: false, avatarUrl: 'https://i.pravatar.cc/150?u=5', clientCount: 14, shiftTime: '12:00 PM – 08:00 PM'),
-  const _Trainer(id: 'T006', name: 'Zendaya Coleman',    specialty: 'Yoga & Flexibility', isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=6', clientCount: 20, shiftTime: '09:00 AM – 05:00 PM'),
-  const _Trainer(id: 'T007', name: 'Henry Cavill',       specialty: 'Bodybuilding',       isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=7', clientCount: 16, shiftTime: '07:00 AM – 03:00 PM'),
-  const _Trainer(id: 'T008', name: 'Priyanka Chopra',    specialty: 'Cardio & HIIT',      isClockedIn: false, avatarUrl: 'https://i.pravatar.cc/150?u=8', clientCount: 12, shiftTime: '02:00 PM – 10:00 PM'),
+  const _Trainer(id: 'T001', name: 'Chris Evans',        specialty: 'Bodybuilding',      isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=1', shiftTime: '07:00 AM – 03:00 PM'),
+  const _Trainer(id: 'T002', name: 'Scarlett Johansson', specialty: 'Yoga & Flexibility', isClockedIn: false, avatarUrl: 'https://i.pravatar.cc/150?u=2', shiftTime: '10:00 AM – 06:00 PM'),
+  const _Trainer(id: 'T003', name: 'Dwayne Johnson',     specialty: 'Powerlifting',       isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=3', shiftTime: '06:00 AM – 02:00 PM'),
+  const _Trainer(id: 'T004', name: 'Gal Gadot',          specialty: 'Cardio & HIIT',      isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=4', shiftTime: '08:00 AM – 04:00 PM'),
+  const _Trainer(id: 'T005', name: 'Jason Momoa',        specialty: 'Powerlifting',       isClockedIn: false, avatarUrl: 'https://i.pravatar.cc/150?u=5', shiftTime: '12:00 PM – 08:00 PM'),
+  const _Trainer(id: 'T006', name: 'Zendaya Coleman',    specialty: 'Yoga & Flexibility', isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=6', shiftTime: '09:00 AM – 05:00 PM'),
+  const _Trainer(id: 'T007', name: 'Henry Cavill',       specialty: 'Bodybuilding',       isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=7', shiftTime: '07:00 AM – 03:00 PM'),
+  const _Trainer(id: 'T008', name: 'Priyanka Chopra',    specialty: 'Cardio & HIIT',      isClockedIn: false, avatarUrl: 'https://i.pravatar.cc/150?u=8', shiftTime: '02:00 PM – 10:00 PM'),
 ];
 
 // ---------------------------------------------------------------------------
@@ -54,6 +59,7 @@ class _TrainersScreenState extends State<TrainersScreen> {
   String _searchQuery  = '';
   String _statusFilter = 'All';
   bool   _isGridView   = true;
+  _Trainer? _selectedTrainer;
 
   static const List<String> _statusOptions = ['All', 'Clocked In', 'Clocked Out'];
 
@@ -70,10 +76,39 @@ class _TrainersScreenState extends State<TrainersScreen> {
     super.dispose();
   }
 
+  void _selectTrainer(_Trainer trainer) {
+    final wide = MediaQuery.sizeOf(context).width >= 1200;
+    if (wide) {
+      setState(() => _selectedTrainer = trainer);
+    } else {
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: FractionallySizedBox(
+            heightFactor: 0.9,
+            child: TrainerDetailPanel(
+              trainerName: trainer.name,
+              specialty: trainer.specialty,
+              isClockedIn: trainer.isClockedIn,
+              avatarUrl: trainer.avatarUrl,
+              shiftTime: trainer.shiftTime,
+              members: trainer.members,
+              onClose: () => Navigator.pop(context),
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final clockedIn    = _dummyTrainers.where((t) => t.isClockedIn).length;
     final totalClients = _dummyTrainers.fold<int>(0, (s, t) => s + t.clientCount);
+    final isWide = MediaQuery.sizeOf(context).width >= 1200;
 
     return Padding(
       padding: const EdgeInsets.all(28.0),
@@ -94,7 +129,33 @@ class _TrainersScreenState extends State<TrainersScreen> {
             onToggleView: (grid) => setState(() => _isGridView = grid),
           ),
           const SizedBox(height: 16),
-          Expanded(child: _isGridView ? _TrainerGrid(trainers: _filtered) : _TrainerTable(trainers: _filtered)),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: _isGridView
+                      ? _TrainerGrid(trainers: _filtered, onTrainerTap: _selectTrainer)
+                      : _TrainerTable(trainers: _filtered, onTrainerTap: _selectTrainer),
+                ),
+                if (_selectedTrainer != null && isWide) ...[
+                  const SizedBox(width: 20),
+                  SizedBox(
+                    width: 400,
+                    child: TrainerDetailPanel(
+                      trainerName: _selectedTrainer!.name,
+                      specialty: _selectedTrainer!.specialty,
+                      isClockedIn: _selectedTrainer!.isClockedIn,
+                      avatarUrl: _selectedTrainer!.avatarUrl,
+                      shiftTime: _selectedTrainer!.shiftTime,
+                      members: _selectedTrainer!.members,
+                      onClose: () => setState(() => _selectedTrainer = null),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -276,7 +337,8 @@ class _ViewToggleBtn extends StatelessWidget {
 // ---------------------------------------------------------------------------
 class _TrainerGrid extends StatelessWidget {
   final List<_Trainer> trainers;
-  const _TrainerGrid({required this.trainers});
+  final ValueChanged<_Trainer> onTrainerTap;
+  const _TrainerGrid({required this.trainers, required this.onTrainerTap});
 
   @override
   Widget build(BuildContext context) {
@@ -284,14 +346,15 @@ class _TrainerGrid extends StatelessWidget {
     return GridView.builder(
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 360, mainAxisExtent: 220, crossAxisSpacing: 16, mainAxisSpacing: 16),
       itemCount: trainers.length,
-      itemBuilder: (_, i) => _TrainerGridCard(trainer: trainers[i]),
+      itemBuilder: (_, i) => _TrainerGridCard(trainer: trainers[i], onTap: () => onTrainerTap(trainers[i])),
     );
   }
 }
 
 class _TrainerGridCard extends StatefulWidget {
   final _Trainer trainer;
-  const _TrainerGridCard({required this.trainer});
+  final VoidCallback onTap;
+  const _TrainerGridCard({required this.trainer, required this.onTap});
   @override
   State<_TrainerGridCard> createState() => _TrainerGridCardState();
 }
@@ -303,9 +366,12 @@ class _TrainerGridCardState extends State<_TrainerGridCard> {
   Widget build(BuildContext context) {
     final t = widget.trainer;
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit:  (_) => setState(() => _hovered = false),
-      child: AnimatedContainer(
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         decoration: BoxDecoration(
           color: AppColors.surface,
@@ -358,7 +424,7 @@ class _TrainerGridCardState extends State<_TrainerGridCard> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () {},
+                    onPressed: widget.onTap,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary, foregroundColor: Colors.black,
                       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -372,6 +438,7 @@ class _TrainerGridCardState extends State<_TrainerGridCard> {
               ]),
             ],
           ),
+        ),
         ),
       ),
     );
@@ -456,7 +523,8 @@ class _OverflowMenu extends StatelessWidget {
 // ---------------------------------------------------------------------------
 class _TrainerTable extends StatelessWidget {
   final List<_Trainer> trainers;
-  const _TrainerTable({required this.trainers});
+  final ValueChanged<_Trainer> onTrainerTap;
+  const _TrainerTable({required this.trainers, required this.onTrainerTap});
 
   @override
   Widget build(BuildContext context) {
@@ -480,7 +548,9 @@ class _TrainerTable extends StatelessWidget {
               DataColumn(label: Text('SHIFT')),
               DataColumn(label: Text('ACTIONS')),
             ],
-            rows: trainers.map((t) => DataRow(cells: [
+            rows: trainers.map((t) => DataRow(
+              onSelectChanged: (_) => onTrainerTap(t),
+              cells: [
               DataCell(Row(children: [
                 CircleAvatar(radius: 16, backgroundImage: NetworkImage(t.avatarUrl), backgroundColor: AppColors.border),
                 const SizedBox(width: 10),
