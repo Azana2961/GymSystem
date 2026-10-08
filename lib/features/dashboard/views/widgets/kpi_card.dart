@@ -8,6 +8,7 @@ class KpiCard extends StatelessWidget {
   final Color iconColor;
   final String trend;
   final bool isTrendUp;
+  final String trendDescription;
 
   const KpiCard({
     super.key,
@@ -17,6 +18,7 @@ class KpiCard extends StatelessWidget {
     required this.iconColor,
     required this.trend,
     required this.isTrendUp,
+    this.trendDescription = 'vs last month',
   });
 
   @override
@@ -85,9 +87,9 @@ class KpiCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 4),
-                  const Text(
-                    'vs last month',
-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                  Text(
+                    trendDescription,
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
                   ),
                 ],
               ),

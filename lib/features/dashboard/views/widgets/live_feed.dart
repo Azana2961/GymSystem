@@ -20,18 +20,34 @@ class LiveFeedWidget extends StatelessWidget {
                 itemCount: DummyData.recentCheckIns.length,
                 itemBuilder: (context, index) {
                   final attendance = DummyData.recentCheckIns[index];
-                  final bool isValid = !attendance.member.isPaymentPending && attendance.member.expiryDate.isAfter(DateTime.now());
+                  String status = 'Active';
+                  Color statusColor = AppColors.success;
+                  
+                  if (attendance.member.isPaymentPending) {
+                    status = 'Overdue';
+                    statusColor = AppColors.error;
+                  } else {
+                    final daysToExpire = attendance.member.expiryDate.difference(DateTime.now()).inDays;
+                    if (daysToExpire < 0) {
+                      status = 'Overdue';
+                      statusColor = AppColors.error;
+                    } else if (daysToExpire <= 5) {
+                      status = 'Expiring Soon';
+                      statusColor = AppColors.warning;
+                    }
+                  }
+
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: CircleAvatar(
+                      backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${attendance.member.id}'),
                       backgroundColor: AppColors.border,
-                      child: Text(attendance.member.name[0], style: const TextStyle(color: AppColors.textPrimary)),
                     ),
                     title: Text(attendance.member.name, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
                     subtitle: Text('${attendance.checkInTime.hour}:${attendance.checkInTime.minute.toString().padLeft(2, '0')} - ID: ${attendance.member.id}'),
                     trailing: Chip(
-                      backgroundColor: isValid ? AppColors.success.withValues(alpha: 0.2) : AppColors.error.withValues(alpha: 0.2),
-                      label: Text(isValid ? 'Valid' : 'Invalid', style: TextStyle(color: isValid ? AppColors.success : AppColors.error)),
+                      backgroundColor: statusColor.withValues(alpha: 0.1),
+                      label: Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold)),
                       side: BorderSide.none,
                     ),
                   );
