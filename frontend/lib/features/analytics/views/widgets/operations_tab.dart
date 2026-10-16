@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:gym_system/core/theme/colors.dart';
-import 'package:gym_system/core/constants/dummy_data.dart';
 
 class OperationsTab extends StatelessWidget {
   const OperationsTab({super.key});
@@ -11,112 +10,50 @@ class OperationsTab extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Left: Heatmap & Footfall
-              Expanded(
-                flex: 7,
-                child: Column(
-                  children: [
-                    // Footfall KPI
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24.0),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Average Daily Footfall', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                                const SizedBox(height: 4),
-                                const Text('Average unique physical visits per day.', style: TextStyle(color: AppColors.textSecondary)),
-                              ],
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: AppColors.primary.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
-                              ),
-                              child: const Text('245 Members', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.primary)),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    // Heatmap
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Peak Hours Heatmap', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 8),
-                            const Text('Darker blocks indicate highest volume of check-ins.', style: TextStyle(color: AppColors.textSecondary)),
-                            const SizedBox(height: 24),
-                            _buildHeatmap(),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 24),
-              // Right: Trainer Utilization Table
-              Expanded(
-                flex: 4,
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text('Trainer Utilization', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 8),
-                        const Text('Top trainers by attendance and PT load.', style: TextStyle(color: AppColors.textSecondary)),
-                        const SizedBox(height: 24),
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: DataTable(
-                            headingTextStyle: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textSecondary),
-                            columns: const [
-                              DataColumn(label: Text('Trainer')),
-                              DataColumn(label: Text('Attendance %')),
-                              DataColumn(label: Text('PT Clients')),
-                            ],
-                            rows: DummyData.trainers.take(6).map((trainer) {
-                              final clients = DummyData.membersForTrainer(trainer.id).length;
-                              final attendance = 85 + (clients % 15); // Mock attendance
-                              return DataRow(
-                                cells: [
-                                  DataCell(
-                                    Row(
-                                      children: [
-                                        CircleAvatar(radius: 16, backgroundImage: NetworkImage(trainer.avatarUrl)),
-                                        const SizedBox(width: 12),
-                                        Text(trainer.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                      ],
-                                    ),
-                                  ),
-                                  DataCell(Text('$attendance%')),
-                                  DataCell(Text('$clients / ${trainer.clientCapacity}')),
-                                ],
-                              );
-                            }).toList(),
-                          ),
-                        ),
-                      ],
-                    ),
+          // Footfall KPI
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Average Daily Footfall', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      const Text('Average unique physical visits per day.', style: TextStyle(color: AppColors.textSecondary)),
+                    ],
                   ),
-                ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                    ),
+                    child: const Text('245 Members', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                  ),
+                ],
               ),
-            ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          // Heatmap
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Peak Hours Heatmap', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  const Text('Darker blocks indicate highest volume of check-ins.', style: TextStyle(color: AppColors.textSecondary)),
+                  const SizedBox(height: 24),
+                  _buildHeatmap(),
+                ],
+              ),
+            ),
           ),
         ],
       ),

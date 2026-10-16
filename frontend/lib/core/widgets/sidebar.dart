@@ -93,17 +93,9 @@ class _SidebarState extends State<Sidebar> {
             isCollapsed: _isCollapsed,
           ),
           _SidebarItem(
-            icon: Icons.sports_kabaddi,
-            title: 'Trainers',
-            index: 2,
-            selectedIndex: widget.selectedIndex,
-            onItemSelected: widget.onItemSelected,
-            isCollapsed: _isCollapsed,
-          ),
-          _SidebarItem(
             icon: Icons.bar_chart,
             title: 'Analytics',
-            index: 3,
+            index: 2,
             selectedIndex: widget.selectedIndex,
             onItemSelected: widget.onItemSelected,
             isCollapsed: _isCollapsed,
@@ -111,7 +103,7 @@ class _SidebarState extends State<Sidebar> {
           _SidebarItem(
             icon: Icons.settings,
             title: 'Settings',
-            index: 4,
+            index: 3,
             selectedIndex: widget.selectedIndex,
             onItemSelected: widget.onItemSelected,
             isCollapsed: _isCollapsed,

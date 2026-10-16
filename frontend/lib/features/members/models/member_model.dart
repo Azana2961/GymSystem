@@ -10,7 +10,6 @@ class MemberModel {
   final String? gender;
   final String? notes;
   final bool isActive;
-  final String? trainerId;
 
   MemberModel({
     required this.id,
@@ -24,7 +23,6 @@ class MemberModel {
     this.gender,
     this.notes,
     this.isActive = true,
-    this.trainerId,
   });
 
   MemberModel copyWith({
@@ -39,7 +37,6 @@ class MemberModel {
     String? gender,
     String? notes,
     bool? isActive,
-    String? trainerId,
   }) {
     return MemberModel(
       id: id ?? this.id,
@@ -53,7 +50,6 @@ class MemberModel {
       gender: gender ?? this.gender,
       notes: notes ?? this.notes,
       isActive: isActive ?? this.isActive,
-      trainerId: trainerId ?? this.trainerId,
     );
   }
 
