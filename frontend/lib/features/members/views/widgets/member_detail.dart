@@ -363,39 +363,6 @@ class MemberDetail extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 24),
-        // Assigned Trainer
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Assigned Trainer', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 24,
-                      backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${member.trainerId}'),
-                    ),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Alex Trainer', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          Text('Personal Trainer', style: TextStyle(color: AppColors.textSecondary)),
-                        ],
-                      ),
-                    ),
-                    IconButton(icon: const Icon(Icons.swap_horiz), onPressed: (){}, tooltip: 'Reassign'),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
         // Staff Notes
         Card(
           child: Padding(

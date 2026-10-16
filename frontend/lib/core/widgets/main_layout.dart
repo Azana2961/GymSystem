@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'sidebar.dart';
 import 'package:gym_system/features/dashboard/views/dashboard_screen.dart';
 import 'package:gym_system/features/members/views/members_screen.dart';
-import 'package:gym_system/features/trainers/views/trainers_screen.dart';
 import 'package:gym_system/features/analytics/views/analytics_screen.dart';
 import 'package:gym_system/features/settings/views/settings_screen.dart';
 import 'package:gym_system/core/theme/colors.dart';
@@ -20,7 +19,6 @@ class _MainLayoutState extends State<MainLayout> {
   final List<Widget> _pages = [
     const DashboardScreen(),
     const MembersScreen(),
-    const TrainersScreen(),
     const AnalyticsScreen(),
     const SettingsScreen(),
   ];

@@ -13,11 +13,9 @@ class CriticalAlertsWidget extends StatelessWidget {
       return days >= 0 && days <= 5;
     }).toList();
 
-    final activeTrainers = DummyData.trainers.where((t) => t.isClockedIn).toList();
-
     return Card(
       child: DefaultTabController(
-        length: 3,
+        length: 2,
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Column(
@@ -38,7 +36,6 @@ class CriticalAlertsWidget extends StatelessWidget {
                 tabs: const [
                   Tab(text: 'Failed Access'),
                   Tab(text: 'Expiring'),
-                  Tab(text: 'Trainers'),
                 ],
               ),
               const SizedBox(height: 16),
@@ -78,20 +75,6 @@ class CriticalAlertsWidget extends StatelessWidget {
                                 ),
                                 child: const Text('Renew'),
                               ),
-                            )),
-                      ],
-                    ),
-                    ListView(
-                      children: [
-                        if (activeTrainers.isEmpty) const Text('No trainers currently clocked in.'),
-                        ...activeTrainers.map((t) => ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: CircleAvatar(
-                                backgroundImage: NetworkImage(t.avatarUrl),
-                              ),
-                              title: Text(t.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                              subtitle: Text(t.specialty),
-                              trailing: const Icon(Icons.check_circle, color: AppColors.success),
                             )),
                       ],
                     ),

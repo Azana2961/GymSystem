@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:gym_system/features/members/providers/members_provider.dart';
-import 'package:gym_system/features/members/models/member_model.dart';
 import 'widgets/member_table.dart';
 import 'widgets/member_detail.dart';
 import 'widgets/members_header.dart';
