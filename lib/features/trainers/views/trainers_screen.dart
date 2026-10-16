@@ -2,46 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/core/constants/dummy_data.dart';
 import 'package:gym_system/features/members/models/member_model.dart';
+import 'package:gym_system/features/trainers/models/trainer_model.dart';
 import 'package:gym_system/features/trainers/views/widgets/trainer_detail_panel.dart';
 
 // ---------------------------------------------------------------------------
-// Enriched local Trainer model (self-contained)
+// Enriched local Trainer model wrapper (for convenience in this screen)
 // ---------------------------------------------------------------------------
-class _Trainer {
-  final String id;
-  final String name;
-  final String specialty;
-  final bool isClockedIn;
-  final String avatarUrl;
-  final String shiftTime;
+class _TrainerWrapper {
+  final TrainerModel model;
 
-  const _Trainer({
-    required this.id,
-    required this.name,
-    required this.specialty,
-    required this.isClockedIn,
-    required this.avatarUrl,
-    required this.shiftTime,
-  });
+  const _TrainerWrapper(this.model);
 
-  List<MemberModel> get members => DummyData.membersForTrainer(id);
-
+  List<MemberModel> get members => DummyData.membersForTrainer(model.id);
   int get clientCount => members.length;
 }
 
-// ---------------------------------------------------------------------------
-// Dummy Data
-// ---------------------------------------------------------------------------
-final List<_Trainer> _dummyTrainers = [
-  const _Trainer(id: 'T001', name: 'Chris Evans',        specialty: 'Bodybuilding',      isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=1', shiftTime: '07:00 AM – 03:00 PM'),
-  const _Trainer(id: 'T002', name: 'Scarlett Johansson', specialty: 'Yoga & Flexibility', isClockedIn: false, avatarUrl: 'https://i.pravatar.cc/150?u=2', shiftTime: '10:00 AM – 06:00 PM'),
-  const _Trainer(id: 'T003', name: 'Dwayne Johnson',     specialty: 'Powerlifting',       isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=3', shiftTime: '06:00 AM – 02:00 PM'),
-  const _Trainer(id: 'T004', name: 'Gal Gadot',          specialty: 'Cardio & HIIT',      isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=4', shiftTime: '08:00 AM – 04:00 PM'),
-  const _Trainer(id: 'T005', name: 'Jason Momoa',        specialty: 'Powerlifting',       isClockedIn: false, avatarUrl: 'https://i.pravatar.cc/150?u=5', shiftTime: '12:00 PM – 08:00 PM'),
-  const _Trainer(id: 'T006', name: 'Zendaya Coleman',    specialty: 'Yoga & Flexibility', isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=6', shiftTime: '09:00 AM – 05:00 PM'),
-  const _Trainer(id: 'T007', name: 'Henry Cavill',       specialty: 'Bodybuilding',       isClockedIn: true,  avatarUrl: 'https://i.pravatar.cc/150?u=7', shiftTime: '07:00 AM – 03:00 PM'),
-  const _Trainer(id: 'T008', name: 'Priyanka Chopra',    specialty: 'Cardio & HIIT',      isClockedIn: false, avatarUrl: 'https://i.pravatar.cc/150?u=8', shiftTime: '02:00 PM – 10:00 PM'),
-];
+final List<_TrainerWrapper> _dummyTrainers = DummyData.trainers.map((t) => _TrainerWrapper(t)).toList();
 
 // ---------------------------------------------------------------------------
 // Main Screen
@@ -59,14 +35,14 @@ class _TrainersScreenState extends State<TrainersScreen> {
   String _searchQuery  = '';
   String _statusFilter = 'All';
   bool   _isGridView   = true;
-  _Trainer? _selectedTrainer;
+  bool   _showTimetable = false;
 
   static const List<String> _statusOptions = ['All', 'Clocked In', 'Clocked Out'];
 
-  List<_Trainer> get _filtered => _dummyTrainers.where((t) {
+  List<_TrainerWrapper> get _filtered => _dummyTrainers.where((t) {
     final q = _searchQuery.toLowerCase();
-    final matchesSearch = q.isEmpty || t.name.toLowerCase().contains(q);
-    final matchesStatus = _statusFilter == 'All' || (_statusFilter == 'Clocked In' && t.isClockedIn) || (_statusFilter == 'Clocked Out' && !t.isClockedIn);
+    final matchesSearch = q.isEmpty || t.model.name.toLowerCase().contains(q);
+    final matchesStatus = _statusFilter == 'All' || (_statusFilter == 'Clocked In' && t.model.isClockedIn) || (_statusFilter == 'Clocked Out' && !t.model.isClockedIn);
     return matchesSearch && matchesStatus;
   }).toList();
 
@@ -76,28 +52,22 @@ class _TrainersScreenState extends State<TrainersScreen> {
     super.dispose();
   }
 
-  void _selectTrainer(_Trainer trainer) {
-    setState(() => _selectedTrainer = trainer);
+  void _selectTrainer(_TrainerWrapper trainer) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog.fullscreen(
+        child: TrainerDetailPanel(
+          trainer: trainer.model,
+          members: trainer.members,
+          onClose: () => Navigator.pop(context),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_selectedTrainer != null) {
-      return Padding(
-        padding: const EdgeInsets.all(28.0),
-        child: TrainerDetailPanel(
-          trainerName: _selectedTrainer!.name,
-          specialty: _selectedTrainer!.specialty,
-          isClockedIn: _selectedTrainer!.isClockedIn,
-          avatarUrl: _selectedTrainer!.avatarUrl,
-          shiftTime: _selectedTrainer!.shiftTime,
-          members: _selectedTrainer!.members,
-          onClose: () => setState(() => _selectedTrainer = null),
-        ),
-      );
-    }
-
-    final clockedIn    = _dummyTrainers.where((t) => t.isClockedIn).length;
+    final clockedIn = _dummyTrainers.where((t) => t.model.isClockedIn).length;
     final totalClients = _dummyTrainers.fold<int>(0, (s, t) => s + t.clientCount);
 
     return Padding(
@@ -107,7 +77,17 @@ class _TrainersScreenState extends State<TrainersScreen> {
         children: [
           _TrainersHeader(onAddTrainer: () {}),
           const SizedBox(height: 24),
-          _KpiRow(totalTrainers: _dummyTrainers.length, clockedIn: clockedIn, assignedClients: totalClients, classesToday: 6),
+          Row(
+            children: [
+              Expanded(child: _KpiCard(label: 'Total Trainers', value: '${_dummyTrainers.length}', icon: Icons.person_pin_rounded, iconColor: AppColors.primary, onTap: null)),
+              const SizedBox(width: 16),
+              Expanded(child: _KpiCard(label: 'Clocked In', value: '$clockedIn', icon: Icons.login_rounded, iconColor: AppColors.success, onTap: () => setState(() => _statusFilter = 'Clocked In'))),
+              const SizedBox(width: 16),
+              Expanded(child: _KpiCard(label: 'Assigned Clients', value: '$totalClients', icon: Icons.group_rounded, iconColor: const Color(0xFF64B5F6), onTap: null)),
+              const SizedBox(width: 16),
+              Expanded(child: _KpiCard(label: 'Classes Today', value: '6', icon: Icons.fitness_center_rounded, iconColor: AppColors.warning, onTap: () => setState(() => _showTimetable = true))),
+            ],
+          ),
           const SizedBox(height: 20),
           _FilterBar(
             searchCtrl: _searchCtrl,
@@ -120,9 +100,11 @@ class _TrainersScreenState extends State<TrainersScreen> {
           ),
           const SizedBox(height: 16),
           Expanded(
-            child: _isGridView
-                ? _TrainerGrid(trainers: _filtered, onTrainerTap: _selectTrainer)
-                : _TrainerTable(trainers: _filtered, onTrainerTap: _selectTrainer),
+            child: _showTimetable 
+                ? _TimetableView(onClose: () => setState(() => _showTimetable = false))
+                : (_isGridView
+                    ? _TrainerGrid(trainers: _filtered, onTrainerTap: _selectTrainer)
+                    : _TrainerTable(trainers: _filtered, onTrainerTap: _selectTrainer)),
           ),
         ],
       ),
@@ -160,52 +142,111 @@ class _TrainersHeader extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // KPI Row + Card
 // ---------------------------------------------------------------------------
-class _KpiRow extends StatelessWidget {
-  final int totalTrainers, clockedIn, assignedClients, classesToday;
-  const _KpiRow({required this.totalTrainers, required this.clockedIn, required this.assignedClients, required this.classesToday});
-
-  @override
-  Widget build(BuildContext context) => Row(children: [
-    Expanded(child: _KpiCard(label: 'Total Trainers',    value: '$totalTrainers',    icon: Icons.person_pin_rounded,   iconColor: AppColors.primary)),
-    const SizedBox(width: 16),
-    Expanded(child: _KpiCard(label: 'Clocked In',        value: '$clockedIn',        icon: Icons.login_rounded,        iconColor: AppColors.success)),
-    const SizedBox(width: 16),
-    Expanded(child: _KpiCard(label: 'Assigned Clients',  value: '$assignedClients',  icon: Icons.group_rounded,        iconColor: const Color(0xFF64B5F6))),
-    const SizedBox(width: 16),
-    Expanded(child: _KpiCard(label: 'Classes Today',     value: '$classesToday',     icon: Icons.fitness_center_rounded, iconColor: AppColors.warning)),
-  ]);
-}
-
 class _KpiCard extends StatelessWidget {
   final String label, value;
   final IconData icon;
   final Color iconColor;
-  const _KpiCard({required this.label, required this.value, required this.icon, required this.iconColor});
+  final VoidCallback? onTap;
+  
+  const _KpiCard({required this.label, required this.value, required this.icon, required this.iconColor, this.onTap});
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: AppColors.border),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(child: Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13))),
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(color: iconColor.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
-            child: Icon(icon, color: iconColor, size: 18),
-          ),
-        ]),
-        const SizedBox(height: 10),
-        Text(value, style: const TextStyle(color: AppColors.textPrimary, fontSize: 28, fontWeight: FontWeight.bold)),
-      ],
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(14),
+    child: Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13))),
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(color: iconColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
+              child: Icon(icon, color: iconColor, size: 18),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          Text(value, style: const TextStyle(color: AppColors.textPrimary, fontSize: 28, fontWeight: FontWeight.bold)),
+        ],
+      ),
     ),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Timetable View
+// ---------------------------------------------------------------------------
+class _TimetableView extends StatelessWidget {
+  final VoidCallback onClose;
+  const _TimetableView({required this.onClose});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.event_note, color: AppColors.primary),
+                const SizedBox(width: 8),
+                const Text("Today's Timetable", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                IconButton(icon: const Icon(Icons.close), onPressed: onClose),
+              ],
+            ),
+            const Divider(),
+            Expanded(
+              child: ListView(
+                children: [
+                  _ClassRow('08:00 AM', 'HIIT Blast', 'Gal Gadot', 'Studio A'),
+                  _ClassRow('10:00 AM', 'Yoga Flow', 'Scarlett Johansson', 'Studio B'),
+                  _ClassRow('01:00 PM', 'Powerlifting 101', 'Dwayne Johnson', 'Weights Area'),
+                  _ClassRow('04:00 PM', 'Cardio Core', 'Priyanka Chopra', 'Studio A'),
+                  _ClassRow('06:00 PM', 'Bodybuilding Prep', 'Chris Evans', 'Weights Area'),
+                  _ClassRow('08:00 PM', 'Evening Zen Yoga', 'Zendaya Coleman', 'Studio B'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ClassRow extends StatelessWidget {
+  final String time;
+  final String className;
+  final String trainer;
+  final String location;
+
+  const _ClassRow(this.time, this.className, this.trainer, this.location);
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(time, style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+      ),
+      title: Text(className, style: const TextStyle(fontWeight: FontWeight.bold)),
+      subtitle: Text('Trainer: $trainer • Location: $location'),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -291,7 +332,7 @@ class _ViewToggleBtn extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         width: 44, height: 44,
         decoration: BoxDecoration(
-          color: selected ? AppColors.primary.withOpacity(0.18) : Colors.transparent,
+          color: selected ? AppColors.primary.withValues(alpha: 0.18) : Colors.transparent,
           borderRadius: BorderRadius.circular(9),
         ),
         child: Icon(icon, size: 20, color: selected ? AppColors.primary : AppColors.textSecondary),
@@ -304,25 +345,25 @@ class _ViewToggleBtn extends StatelessWidget {
 // Grid View
 // ---------------------------------------------------------------------------
 class _TrainerGrid extends StatelessWidget {
-  final List<_Trainer> trainers;
-  final ValueChanged<_Trainer> onTrainerTap;
+  final List<_TrainerWrapper> trainers;
+  final ValueChanged<_TrainerWrapper> onTrainerTap;
   const _TrainerGrid({required this.trainers, required this.onTrainerTap});
 
   @override
   Widget build(BuildContext context) {
     if (trainers.isEmpty) return const Center(child: Text('No trainers match your filters.', style: TextStyle(color: AppColors.textSecondary)));
     return GridView.builder(
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 360, mainAxisExtent: 220, crossAxisSpacing: 16, mainAxisSpacing: 16),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 360, mainAxisExtent: 200, crossAxisSpacing: 16, mainAxisSpacing: 16),
       itemCount: trainers.length,
-      itemBuilder: (_, i) => _TrainerGridCard(trainer: trainers[i], onTap: () => onTrainerTap(trainers[i])),
+      itemBuilder: (_, i) => _TrainerGridCard(trainerWrapper: trainers[i], onTap: () => onTrainerTap(trainers[i])),
     );
   }
 }
 
 class _TrainerGridCard extends StatefulWidget {
-  final _Trainer trainer;
+  final _TrainerWrapper trainerWrapper;
   final VoidCallback onTap;
-  const _TrainerGridCard({required this.trainer, required this.onTap});
+  const _TrainerGridCard({required this.trainerWrapper, required this.onTap});
   @override
   State<_TrainerGridCard> createState() => _TrainerGridCardState();
 }
@@ -332,7 +373,12 @@ class _TrainerGridCardState extends State<_TrainerGridCard> {
 
   @override
   Widget build(BuildContext context) {
-    final t = widget.trainer;
+    final t = widget.trainerWrapper.model;
+    
+    // Calculate client capacity progress
+    double capacityRatio = t.currentClients / (t.clientCapacity > 0 ? t.clientCapacity : 1);
+    if (capacityRatio > 1.0) capacityRatio = 1.0;
+
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
@@ -340,73 +386,73 @@ class _TrainerGridCardState extends State<_TrainerGridCard> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _hovered ? AppColors.primary.withOpacity(0.5) : AppColors.border, width: _hovered ? 1.5 : 1.0),
-          boxShadow: _hovered ? [BoxShadow(color: AppColors.primary.withOpacity(0.08), blurRadius: 20, spreadRadius: 2)] : [],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                _AvatarWithStatus(avatarUrl: t.avatarUrl, isClockedIn: t.isClockedIn),
-                const SizedBox(width: 12),
-                Expanded(child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(t.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
-                    const SizedBox(height: 2),
-                    Text(t.specialty, maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: AppColors.primary, fontSize: 12)),
-                  ],
-                )),
-                _StatusBadge(isClockedIn: t.isClockedIn),
-              ]),
-              const SizedBox(height: 14),
-              const Divider(color: AppColors.border, height: 1),
-              const SizedBox(height: 12),
-              Row(children: [
-                _StatChip(icon: Icons.group_rounded, label: '${t.clientCount} Clients'),
-                const SizedBox(width: 6),
-                Expanded(child: _StatChip(icon: Icons.schedule_rounded, label: t.shiftTime)),
-              ]),
-              const Spacer(),
-              Row(children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () {},
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.border),
-                      foregroundColor: AppColors.textPrimary,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    child: const Text('Schedule', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: widget.onTap,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary, foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    child: const Text('Profile', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                _OverflowMenu(trainerName: t.name),
-              ]),
-            ],
+          duration: const Duration(milliseconds: 180),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _hovered ? AppColors.primary.withValues(alpha: 0.5) : AppColors.border, width: _hovered ? 1.5 : 1.0),
+            boxShadow: _hovered ? [BoxShadow(color: AppColors.primary.withValues(alpha: 0.08), blurRadius: 20, spreadRadius: 2)] : [],
           ),
-        ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  _AvatarWithStatus(avatarUrl: t.avatarUrl, isClockedIn: t.isClockedIn),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(t.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
+                      const SizedBox(height: 2),
+                      Text('${t.specialty} • ${t.phone}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    ],
+                  )),
+                  _StatusBadge(liveStatus: t.liveStatus),
+                ]),
+                const SizedBox(height: 14),
+                const Divider(color: AppColors.border, height: 1),
+                const SizedBox(height: 12),
+                
+                // Client Capacity Ratio
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Client Capacity', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    Text('${t.currentClients} / ${t.clientCapacity} Clients', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                LinearProgressIndicator(
+                  value: capacityRatio,
+                  backgroundColor: AppColors.border,
+                  color: capacityRatio >= 1.0 ? AppColors.error : AppColors.success,
+                  minHeight: 6,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                
+                const Spacer(),
+                Row(children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: widget.onTap,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary, foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: const Text('View Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _OverflowMenu(trainerName: t.name),
+                ]),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -420,7 +466,7 @@ class _AvatarWithStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Stack(children: [
-    CircleAvatar(radius: 26, backgroundColor: AppColors.border, backgroundImage: NetworkImage(avatarUrl), onBackgroundImageError: (_, __) {}),
+    CircleAvatar(radius: 26, backgroundColor: AppColors.border, backgroundImage: NetworkImage(avatarUrl), onBackgroundImageError: (_, _) {}),
     Positioned(bottom: 0, right: 0, child: Container(
       width: 12, height: 12,
       decoration: BoxDecoration(
@@ -433,39 +479,31 @@ class _AvatarWithStatus extends StatelessWidget {
 }
 
 class _StatusBadge extends StatelessWidget {
-  final bool isClockedIn;
-  const _StatusBadge({required this.isClockedIn});
+  final String liveStatus;
+  const _StatusBadge({required this.liveStatus});
 
   @override
   Widget build(BuildContext context) {
-    final color = isClockedIn ? AppColors.success : AppColors.secondary;
+    Color color;
+    if (liveStatus.toLowerCase().contains('free')) {
+      color = AppColors.success;
+    } else if (liveStatus.toLowerCase().contains('session')) {
+      color = AppColors.warning;
+    } else {
+      color = AppColors.secondary;
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
+        color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.4)),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
-      child: Text(isClockedIn ? 'Clocked In' : 'Clocked Out',
+      child: Text(liveStatus,
           style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
     );
   }
-}
-
-class _StatChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  const _StatChip({required this.icon, required this.label});
-
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(icon, size: 13, color: AppColors.textSecondary),
-      const SizedBox(width: 4),
-      Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11))),
-    ],
-  );
 }
 
 class _OverflowMenu extends StatelessWidget {
@@ -474,14 +512,14 @@ class _OverflowMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => PopupMenuButton<String>(
-    icon: const Icon(Icons.more_vert, size: 18, color: AppColors.textSecondary),
+    icon: const Icon(Icons.more_vert, color: AppColors.textSecondary, size: 20),
     color: AppColors.surface,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: AppColors.border)),
-    onSelected: (_) {},
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    onSelected: (v) {},
     itemBuilder: (_) => [
-      const PopupMenuItem(value: 'edit',    child: Row(children: [Icon(Icons.edit_outlined,    size: 16, color: AppColors.textSecondary), SizedBox(width: 8), Text('Edit',    style: TextStyle(color: AppColors.textPrimary, fontSize: 13))])),
-      const PopupMenuItem(value: 'message', child: Row(children: [Icon(Icons.message_outlined,  size: 16, color: AppColors.textSecondary), SizedBox(width: 8), Text('Message', style: TextStyle(color: AppColors.textPrimary, fontSize: 13))])),
-      const PopupMenuItem(value: 'delete',  child: Row(children: [Icon(Icons.delete_outline,    size: 16, color: AppColors.error),          SizedBox(width: 8), Text('Remove',  style: TextStyle(color: AppColors.error,       fontSize: 13))])),
+      const PopupMenuItem(value: 'clock_in_out', child: Text('Clock In/Out Override')),
+      const PopupMenuItem(value: 'edit', child: Text('Edit Details')),
+      const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: AppColors.error))),
     ],
   );
 }
@@ -490,50 +528,59 @@ class _OverflowMenu extends StatelessWidget {
 // Table View
 // ---------------------------------------------------------------------------
 class _TrainerTable extends StatelessWidget {
-  final List<_Trainer> trainers;
-  final ValueChanged<_Trainer> onTrainerTap;
+  final List<_TrainerWrapper> trainers;
+  final ValueChanged<_TrainerWrapper> onTrainerTap;
   const _TrainerTable({required this.trainers, required this.onTrainerTap});
 
   @override
   Widget build(BuildContext context) {
     if (trainers.isEmpty) return const Center(child: Text('No trainers match your filters.', style: TextStyle(color: AppColors.textSecondary)));
+
     return Container(
-      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
         child: SingleChildScrollView(
           child: DataTable(
-            headingRowColor: WidgetStateProperty.all(AppColors.background.withOpacity(0.6)),
-            dataRowColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.hovered) ? AppColors.primary.withOpacity(0.05) : Colors.transparent),
-            dividerThickness: 0.5,
-            columnSpacing: 24,
-            headingTextStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.bold),
+            showCheckboxColumn: false,
+            headingTextStyle: const TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.bold),
+            dataRowMaxHeight: 64,
+            dataRowMinHeight: 64,
             columns: const [
-              DataColumn(label: Text('TRAINER')),
-              DataColumn(label: Text('SPECIALTY')),
-              DataColumn(label: Text('STATUS')),
-              DataColumn(label: Text('CLIENTS'), numeric: true),
-              DataColumn(label: Text('SHIFT')),
-              DataColumn(label: Text('ACTIONS')),
+              DataColumn(label: Text('Trainer')),
+              DataColumn(label: Text('Clients')),
+              DataColumn(label: Text('Shift')),
+              DataColumn(label: Text('Live Status')),
+              DataColumn(label: Text('')),
             ],
-            rows: trainers.map((t) => DataRow(
-              onSelectChanged: (_) => onTrainerTap(t),
-              cells: [
-              DataCell(Row(children: [
-                CircleAvatar(radius: 16, backgroundImage: NetworkImage(t.avatarUrl), backgroundColor: AppColors.border),
-                const SizedBox(width: 10),
-                Text(t.name, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
-              ])),
-              DataCell(Text(t.specialty, style: const TextStyle(color: AppColors.primary, fontSize: 13))),
-              DataCell(_StatusBadge(isClockedIn: t.isClockedIn)),
-              DataCell(Text('${t.clientCount}', style: const TextStyle(color: AppColors.textPrimary, fontSize: 13))),
-              DataCell(Text(t.shiftTime, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12))),
-              DataCell(Row(children: [
-                IconButton(icon: const Icon(Icons.edit_outlined,  size: 16, color: AppColors.textSecondary), onPressed: () {}, tooltip: 'Edit',   padding: EdgeInsets.zero, constraints: const BoxConstraints()),
-                const SizedBox(width: 12),
-                IconButton(icon: const Icon(Icons.delete_outline, size: 16, color: AppColors.error),          onPressed: () {}, tooltip: 'Remove', padding: EdgeInsets.zero, constraints: const BoxConstraints()),
-              ])),
-            ])).toList(),
+            rows: trainers.map((tw) {
+              final t = tw.model;
+              return DataRow(
+                onSelectChanged: (_) => onTrainerTap(tw),
+                cells: [
+                  DataCell(Row(children: [
+                    _AvatarWithStatus(avatarUrl: t.avatarUrl, isClockedIn: t.isClockedIn),
+                    const SizedBox(width: 12),
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(t.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Text('${t.specialty} • ${t.phone}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                      ],
+                    ),
+                  ])),
+                  DataCell(Text('${tw.clientCount} / ${t.clientCapacity}')),
+                  DataCell(Text('${t.shiftStart} - ${t.shiftEnd}', style: const TextStyle(color: AppColors.textSecondary))),
+                  DataCell(_StatusBadge(liveStatus: t.liveStatus)),
+                  DataCell(_OverflowMenu(trainerName: t.name)),
+                ],
+              );
+            }).toList(),
           ),
         ),
       ),

@@ -1,68 +1,69 @@
 import 'package:flutter/material.dart';
-import 'widgets/revenue_chart.dart';
 import 'package:gym_system/core/theme/colors.dart';
+import 'package:gym_system/features/analytics/views/widgets/financial_tab.dart';
+import 'package:gym_system/features/analytics/views/widgets/membership_tab.dart';
+import 'package:gym_system/features/analytics/views/widgets/operations_tab.dart';
 
 class AnalyticsScreen extends StatelessWidget {
   const AnalyticsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(32.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Analytics & Reports', style: Theme.of(context).textTheme.headlineLarge),
-          const SizedBox(height: 32),
-          Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return DefaultTabController(
+      length: 3,
+      child: Padding(
+        padding: const EdgeInsets.all(28.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Expanded(
-                  flex: 2,
-                  child: RevenueChart(),
-                ),
-                const SizedBox(width: 24),
-                Expanded(
-                  flex: 1,
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: Card(
-                          child: Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.grid_on, size: 48, color: AppColors.primary),
-                                const SizedBox(height: 16),
-                                Text('Peak Hours Heatmap\n(Placeholder)', textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppColors.textSecondary)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      Expanded(
-                        child: Card(
-                          child: Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.pie_chart, size: 48, color: AppColors.warning),
-                                const SizedBox(height: 16),
-                                Text('Plan Distribution\n(Placeholder)', textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppColors.textSecondary)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                Text('Analytics & Reports', style: Theme.of(context).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold)),
+                Row(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () {},
+                      icon: const Icon(Icons.file_download),
+                      label: const Text('Monthly Excel Export'),
+                      style: OutlinedButton.styleFrom(foregroundColor: AppColors.primary, side: const BorderSide(color: AppColors.primary)),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: () {},
+                      icon: const Icon(Icons.picture_as_pdf),
+                      label: const Text('End of Day (EOD) Report'),
+                      style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.black),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 24),
+            TabBar(
+              isScrollable: true,
+              labelColor: AppColors.primary,
+              unselectedLabelColor: AppColors.textSecondary,
+              indicatorColor: AppColors.primary,
+              dividerColor: AppColors.border,
+              tabs: const [
+                Tab(text: 'Financial Health (Revenue & Cash Flow)'),
+                Tab(text: 'Membership & Retention (Growth)'),
+                Tab(text: 'Operations & Attendance (Efficiency)'),
+              ],
+            ),
+            const SizedBox(height: 24),
+            const Expanded(
+              child: TabBarView(
+                children: [
+                  FinancialTab(),
+                  MembershipTab(),
+                  OperationsTab(),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
