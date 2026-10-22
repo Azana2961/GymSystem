@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:gym_system/features/members/models/member_model.dart';
 import 'package:gym_system/core/constants/dummy_data.dart';
+import 'package:gym_system/core/services/api_service.dart';
 
 enum MemberSortOption { name, expiryDate, id }
 enum MemberStatusFilter { all, active, inactive, expiringSoon }
 enum MemberPlanFilter { all, basic, silver, gold, platinum }
 
 class MembersProvider extends ChangeNotifier {
+  static final MembersProvider _instance = MembersProvider._internal();
+  factory MembersProvider() => _instance;
+  static MembersProvider get instance => _instance;
+
   List<MemberModel> _members = [];
   
   String _searchQuery = '';
@@ -25,16 +30,36 @@ class MembersProvider extends ChangeNotifier {
   MemberModel? _lastDeletedMember;
   int? _lastDeletedIndex;
 
-  MembersProvider() {
-    _init();
+  MembersProvider._internal() {
+    refresh();
   }
 
-  Future<void> _init() async {
-    // Simulate network delay for shimmer effect
-    await Future.delayed(const Duration(milliseconds: 1500));
-    _members = List.from(DummyData.members);
+  /// Initialize and fetch latest members from SQLite database
+  Future<void> refresh() async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final list = await ApiService.instance.getMembers();
+      if (list.isNotEmpty) {
+        _members = list;
+        _syncDummyData();
+        _isLoading = false;
+        notifyListeners();
+        return;
+      }
+    } catch (_) {}
+
+    if (_members.isEmpty) {
+      _members = List.from(DummyData.members);
+    }
     _isLoading = false;
     notifyListeners();
+  }
+
+  void _syncDummyData() {
+    DummyData.members.clear();
+    DummyData.members.addAll(_members);
   }
   
   // Getters
@@ -108,23 +133,29 @@ class MembersProvider extends ChangeNotifier {
   int get totalFilteredMembers => filteredAndSortedMembers.length;
   int get totalPages => (totalFilteredMembers / _rowsPerPage).ceil();
 
-  // Summary Getters
+  // Summary Card Stats
   int get totalMembersCount => _members.length;
+  
   int get activeMembersCount => _members.where((m) {
-    bool isExpired = m.expiryDate.isBefore(DateTime.now());
-    return m.isActive && !m.isPaymentPending && !isExpired;
+    return m.isActive && !m.isPaymentPending && !m.isExpired;
   }).length;
-  int get inactiveMembersCount => _members.where((m) {
-    bool isExpired = m.expiryDate.isBefore(DateTime.now());
-    return !m.isActive || m.isPaymentPending || isExpired;
-  }).length;
+  
   int get expiringSoonCount => _members.where((m) {
-    bool isExpired = m.expiryDate.isBefore(DateTime.now());
-    bool isInactive = !m.isActive || m.isPaymentPending || isExpired;
-    return !isInactive && m.expiryDate.isAfter(DateTime.now()) && m.expiryDate.isBefore(DateTime.now().add(const Duration(days: 7)));
+    return !m.isExpired && 
+           !m.isPaymentPending && 
+           m.expiryDate.isAfter(DateTime.now()) && 
+           m.expiryDate.isBefore(DateTime.now().add(const Duration(days: 7)));
+  }).length;
+  
+  int get inactiveMembersCount => _members.where((m) {
+    return !m.isActive || m.isPaymentPending || m.isExpired;
   }).length;
 
-  // Actions
+  int get pendingPaymentCount => _members.where((m) {
+    return m.isPaymentPending || m.isExpired;
+  }).length;
+
+  // Setters & Actions
   void setSearchQuery(String query) {
     _searchQuery = query;
     _currentPage = 0;
@@ -167,32 +198,72 @@ class MembersProvider extends ChangeNotifier {
     notifyListeners();
   }
   
-  // CRUD
-  void addMember(MemberModel member) {
-    _members.add(member);
+  // ── SQLite CRUD Operations ──────────────────────────────────────────────
+
+  /// Add member to UI and persist to SQLite database
+  Future<void> addMember(MemberModel member, {bool sendWelcome = true}) async {
+    _members.insert(0, member);
+    _syncDummyData();
     notifyListeners();
+
+    try {
+      final res = await ApiService.instance.registerMember(member, sendWelcome: sendWelcome);
+      if (res != null && res['member'] != null) {
+        final serverMember = res['member'];
+        final idx = _members.indexWhere((m) => m.id == member.id);
+        if (idx != -1) {
+          _members[idx] = _members[idx].copyWith(
+            id: serverMember['id'] ?? member.id,
+            qrToken: serverMember['qr_token'],
+          );
+          _syncDummyData();
+          notifyListeners();
+        }
+      }
+    } catch (_) {}
   }
-  
-  void updateMember(MemberModel member) {
+
+  /// Update member in UI and persist to SQLite database
+  Future<void> updateMember(
+    MemberModel member, {
+    bool sendReceipt = false,
+    double? paidAmount,
+    String? paymentMethod,
+  }) async {
     final index = _members.indexWhere((m) => m.id == member.id);
     if (index != -1) {
       _members[index] = member;
+      _syncDummyData();
       notifyListeners();
     }
+
+    try {
+      await ApiService.instance.updateMember(
+        member,
+        sendReceipt: sendReceipt,
+        paidAmount: paidAmount,
+        paymentMethod: paymentMethod,
+      );
+    } catch (_) {}
   }
   
-  void deleteMember(String id) {
+  /// Delete member from UI and SQLite database
+  Future<void> deleteMember(String id) async {
     final index = _members.indexWhere((m) => m.id == id);
     if (index != -1) {
       _lastDeletedMember = _members[index];
       _lastDeletedIndex = index;
       _members.removeAt(index);
+      _syncDummyData();
       
-      // adjust current page if necessary
       if (_currentPage >= totalPages && totalPages > 0) {
         _currentPage = totalPages - 1;
       }
       notifyListeners();
+
+      try {
+        await ApiService.instance.deleteMember(id);
+      } catch (_) {}
     }
   }
 
@@ -203,6 +274,8 @@ class MembersProvider extends ChangeNotifier {
       } else {
          _members.add(_lastDeletedMember!);
       }
+      _syncDummyData();
+      addMember(_lastDeletedMember!, sendWelcome: false);
       _lastDeletedMember = null;
       _lastDeletedIndex = null;
       notifyListeners();

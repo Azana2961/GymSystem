@@ -10,6 +10,7 @@ class MemberModel {
   final String? gender;
   final String? notes;
   final bool isActive;
+  final String? qrToken;
 
   MemberModel({
     required this.id,
@@ -23,6 +24,7 @@ class MemberModel {
     this.gender,
     this.notes,
     this.isActive = true,
+    this.qrToken,
   });
 
   MemberModel copyWith({
@@ -37,6 +39,7 @@ class MemberModel {
     String? gender,
     String? notes,
     bool? isActive,
+    String? qrToken,
   }) {
     return MemberModel(
       id: id ?? this.id,
@@ -50,6 +53,7 @@ class MemberModel {
       gender: gender ?? this.gender,
       notes: notes ?? this.notes,
       isActive: isActive ?? this.isActive,
+      qrToken: qrToken ?? this.qrToken,
     );
   }
 

@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:gym_system/features/members/models/member_model.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/features/members/views/widgets/member_form_dialog.dart';
+import 'package:gym_system/core/constants/app_settings.dart';
+import 'package:gym_system/core/widgets/receipt_qr_dialog.dart';
 import 'package:gym_system/features/members/providers/members_provider.dart';
+import 'package:gym_system/features/dashboard/views/widgets/collect_payment_dialog.dart';
 
 class MemberDetail extends StatelessWidget {
   final MemberModel member;
@@ -65,15 +68,57 @@ class MemberDetail extends StatelessWidget {
             label: const Text('Edit Profile', style: TextStyle(color: AppColors.textPrimary)),
           ),
           const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => ReceiptQrDialog(
+                  member: member,
+                  planFee: AppSettings.instance.getPlanPrice(member.plan),
+                  admissionFee: 0.0,
+                  discount: 0.0,
+                  totalPaid: AppSettings.instance.getPlanPrice(member.plan),
+                  paymentMethod: 'Verified',
+                  isNewRegistration: false,
+                ),
+              );
+            },
+            icon: const Icon(Icons.badge_rounded, size: 16, color: AppColors.primary),
+            label: const Text('Member Pass', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 13)),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: AppColors.primary, width: 0.8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+          const SizedBox(width: 8),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8.0),
             child: ElevatedButton.icon(
               onPressed: () {
-                provider.updateMember(member.copyWith(
-                  expiryDate: isExpired 
-                      ? DateTime.now().add(const Duration(days: 30))
-                      : member.expiryDate.add(const Duration(days: 30)),
-                ));
+                final planDays = AppSettings.instance.getPlanDurationDays(member.plan);
+                final newExpiry = isExpired 
+                    ? DateTime.now().add(Duration(days: planDays))
+                    : member.expiryDate.add(Duration(days: planDays));
+                final updated = member.copyWith(
+                  expiryDate: newExpiry,
+                  isPaymentPending: false,
+                  isActive: true,
+                );
+                provider.updateMember(updated);
+
+                showDialog(
+                  context: context,
+                  builder: (context) => ReceiptQrDialog(
+                    member: updated,
+                    planFee: AppSettings.instance.getPlanPrice(member.plan),
+                    admissionFee: 0.0,
+                    discount: 0.0,
+                    totalPaid: AppSettings.instance.getPlanPrice(member.plan),
+                    paymentMethod: 'Cash',
+                    isNewRegistration: false,
+                  ),
+                );
               },
               icon: const Icon(Icons.autorenew),
               label: const Text('Renew Plan'),
@@ -100,9 +145,9 @@ class MemberDetail extends StatelessWidget {
             if (!isWide) {
               return Column(
                 children: [
-                  _buildLeftColumn(),
+                  _buildLeftColumn(context),
                   const SizedBox(height: 24),
-                  _buildMiddleColumn(),
+                  _buildMiddleColumn(context),
                   const SizedBox(height: 24),
                   _buildRightColumn(),
                 ],
@@ -113,10 +158,10 @@ class MemberDetail extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Left Column (30%)
-                Expanded(flex: 3, child: _buildLeftColumn()),
+                Expanded(flex: 3, child: _buildLeftColumn(context)),
                 const SizedBox(width: 24),
                 // Middle Column (40%)
-                Expanded(flex: 4, child: _buildMiddleColumn()),
+                Expanded(flex: 4, child: _buildMiddleColumn(context)),
                 const SizedBox(width: 24),
                 // Right Column (30%)
                 Expanded(flex: 3, child: _buildRightColumn()),
@@ -128,7 +173,7 @@ class MemberDetail extends StatelessWidget {
     );
   }
 
-  Widget _buildLeftColumn() {
+  Widget _buildLeftColumn(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -158,46 +203,81 @@ class MemberDetail extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 24),
-        // Hardware Setup Card
+        // Digital Access Pass Card
         Card(
           child: Padding(
             padding: const EdgeInsets.all(24.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Hardware Setup', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Digital Access Pass', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.success.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle_rounded, color: AppColors.success, size: 12),
+                          SizedBox(width: 4),
+                          Text('ACTIVE', style: TextStyle(color: AppColors.success, fontSize: 11, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 16),
                 Row(
                   children: [
-                    const Icon(Icons.fingerprint, color: AppColors.success, size: 28),
-                    const SizedBox(width: 12),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                      ),
+                      child: const Icon(Icons.qr_code_2_rounded, color: AppColors.primary, size: 26),
+                    ),
+                    const SizedBox(width: 14),
                     const Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Fingerprint', style: TextStyle(fontWeight: FontWeight.bold)),
-                          Text('Registered (Thumb)', style: TextStyle(color: AppColors.success, fontSize: 12)),
+                          Text('Digital QR Pass', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          SizedBox(height: 2),
+                          Text('Ready for check-in scan', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                         ],
                       ),
                     ),
-                    TextButton(onPressed: (){}, child: const Text('Scan New')),
-                  ],
-                ),
-                const Divider(height: 24),
-                Row(
-                  children: [
-                    const Icon(Icons.qr_code_scanner, color: AppColors.warning, size: 28),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('App Pass', style: TextStyle(fontWeight: FontWeight.bold)),
-                          Text('Pending', style: TextStyle(color: AppColors.warning, fontSize: 12)),
-                        ],
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (context) => ReceiptQrDialog(
+                            member: member,
+                            planFee: AppSettings.instance.getPlanPrice(member.plan),
+                            admissionFee: 0.0,
+                            discount: 0.0,
+                            totalPaid: AppSettings.instance.getPlanPrice(member.plan),
+                            paymentMethod: 'Active',
+                            isNewRegistration: false,
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.qr_code_rounded, size: 14, color: Colors.black),
+                      label: const Text('View Pass', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
-                    TextButton(onPressed: (){}, child: const Text('Generate QR')),
                   ],
                 ),
               ],
@@ -208,7 +288,7 @@ class MemberDetail extends StatelessWidget {
     );
   }
 
-  Widget _buildMiddleColumn() {
+  Widget _buildMiddleColumn(BuildContext context) {
     final daysUntilExpiry = member.expiryDate.difference(DateTime.now()).inDays;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -268,11 +348,16 @@ class MemberDetail extends StatelessWidget {
                           children: [
                             Icon(Icons.warning, color: AppColors.error),
                             SizedBox(width: 8),
-                            Text('Pending Dues: \$50.00', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.error)),
+                            Text('Pending Dues: Rs. 5,000', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.error)),
                           ],
                         ),
                         ElevatedButton(
-                          onPressed: () {},
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => CollectPaymentDialog(initialMember: member),
+                            );
+                          },
                           style: ElevatedButton.styleFrom(backgroundColor: AppColors.error, foregroundColor: Colors.white),
                           child: const Text('Collect Fee'),
                         ),
@@ -304,16 +389,33 @@ class MemberDetail extends StatelessWidget {
                       contentPadding: EdgeInsets.zero,
                       leading: const CircleAvatar(
                         backgroundColor: AppColors.success,
-                        child: Icon(Icons.attach_money, color: Colors.white),
+                        child: Icon(Icons.payments_rounded, color: Colors.white, size: 20),
                       ),
                       title: const Text('Membership Renewal', style: TextStyle(fontWeight: FontWeight.bold)),
                       subtitle: const Text('Processed by Staff A • Cash'),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text('\$50.00', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          const Text('Rs. 5,000', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                           const SizedBox(width: 8),
-                          IconButton(icon: const Icon(Icons.receipt_long), onPressed: (){}, tooltip: 'Reprint Receipt'),
+                          IconButton(
+                            icon: const Icon(Icons.qr_code_2_rounded, color: AppColors.primary, size: 20),
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) => ReceiptQrDialog(
+                                  member: member,
+                                  planFee: AppSettings.instance.getPlanPrice(member.plan),
+                                  admissionFee: 0.0,
+                                  discount: 0.0,
+                                  totalPaid: 5000.0,
+                                  paymentMethod: 'Cash',
+                                  isNewRegistration: false,
+                                ),
+                              );
+                            },
+                            tooltip: 'View Member Pass',
+                          ),
                         ],
                       ),
                     );

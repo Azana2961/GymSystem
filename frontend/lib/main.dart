@@ -12,7 +12,7 @@ class GymSystemApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Gym System',
+      title: 'Lá Fitness',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
       home: const MainLayout(),
