@@ -1,0 +1,1433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Titan Gym — Hub & Anti-Ban WhatsApp Automation</title>
+  <style>
+    :root {
+      --bg: #0d0f12;
+      --surface: #15181e;
+      --slate: #1f242d;
+      --outline: #2f3642;
+      --outline-focus: #4b5563;
+      --green: #00E676;
+      --blue: #00B0FF;
+      --purple: #7C4DFF;
+      --amber: #FFAB00;
+      --red: #FF1744;
+      --text: #F3F4F6;
+      --text-muted: #9CA3AF;
+      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-family);
+      padding: 24px;
+      line-height: 1.5;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+
+    /* Header */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--outline);
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .brand-icon {
+      background: linear-gradient(135deg, rgba(0, 230, 118, 0.2), rgba(0, 176, 255, 0.2));
+      border: 1px solid var(--green);
+      color: var(--green);
+      width: 46px;
+      height: 46px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      box-shadow: 0 0 15px rgba(0, 230, 118, 0.2);
+    }
+    .brand h1 { font-size: 22px; font-weight: 900; letter-spacing: 0.5px; }
+    .brand p { font-size: 13px; color: var(--text-muted); }
+    .badges-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--outline);
+      padding: 7px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.2); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+
+    /* Tablet Connection Banner */
+    .tablet-banner {
+      background: linear-gradient(135deg, #161c28 0%, #15181e 100%);
+      border: 1px solid rgba(0, 176, 255, 0.3);
+      border-radius: 16px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+    .tablet-info { display: flex; align-items: center; gap: 16px; }
+    .tablet-icon {
+      font-size: 32px;
+      background: rgba(0, 176, 255, 0.15);
+      border: 1px solid var(--blue);
+      border-radius: 12px;
+      width: 52px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ip-box {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--blue);
+      background: rgba(0, 0, 0, 0.4);
+      padding: 4px 12px;
+      border-radius: 8px;
+      border: 1px dashed rgba(0, 176, 255, 0.4);
+      display: inline-block;
+      margin-top: 4px;
+      cursor: pointer;
+    }
+    .tablet-actions { display: flex; gap: 10px; align-items: center; }
+
+    /* KPI Grid */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--outline);
+      border-radius: 16px;
+      padding: 18px 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .kpi-title { font-size: 12px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+    .kpi-value { font-size: 30px; font-weight: 900; margin-top: 6px; }
+    .kpi-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+    /* Tabs & Panels */
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--outline);
+      padding-bottom: 12px;
+    }
+    .tab-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      padding: 8px 18px;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover { color: var(--text); background: var(--slate); }
+    .tab-btn.active {
+      color: black;
+      background: var(--green);
+      border-color: var(--green);
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* WhatsApp Center */
+    .wa-center {
+      background: var(--surface);
+      border: 1px solid var(--outline);
+      border-radius: 18px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    .wa-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .safeguard-pills {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .safeguard-card {
+      background: var(--slate);
+      border: 1px solid var(--outline);
+      border-radius: 12px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .safeguard-icon {
+      font-size: 20px;
+      background: rgba(0, 230, 118, 0.1);
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--green);
+    }
+    .safeguard-info h4 { font-size: 13px; font-weight: 700; }
+    .safeguard-info p { font-size: 11px; color: var(--text-muted); }
+
+    /* Live Countdown / Progress Bar */
+    .countdown-bar {
+      background: #11141a;
+      border: 1px solid rgba(0, 230, 118, 0.3);
+      border-radius: 12px;
+      padding: 14px 18px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    .countdown-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .progress-track {
+      background: var(--slate);
+      height: 8px;
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+    .progress-fill {
+      background: linear-gradient(90deg, var(--green), var(--blue));
+      height: 100%;
+      width: 0%;
+      transition: width 0.3s linear;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid transparent;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: var(--green); color: black; }
+    .btn-primary:hover { background: #00c853; }
+    .btn-blue { background: var(--blue); color: black; }
+    .btn-blue:hover { background: #0091ea; }
+    .btn-outline { background: transparent; border-color: var(--outline); color: var(--text); }
+    .btn-outline:hover { background: var(--slate); border-color: var(--outline-focus); }
+    .btn-danger { background: rgba(255, 23, 68, 0.15); border-color: var(--red); color: var(--red); }
+    .btn-danger:hover { background: var(--red); color: white; }
+    .btn-amber { background: rgba(255, 171, 0, 0.15); border-color: var(--amber); color: var(--amber); }
+
+    /* Grid layout */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    @media (max-width: 1000px) {
+      .main-grid { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--outline);
+      border-radius: 18px;
+      padding: 22px;
+    }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .panel-header h2 { font-size: 17px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+
+    /* Feed styling */
+    .feed-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 520px;
+      overflow-y: auto;
+    }
+    .feed-item {
+      background: var(--slate);
+      border: 1px solid var(--outline);
+      border-radius: 12px;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      animation: slideIn 0.3s ease-out;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .feed-name { font-size: 15px; font-weight: 700; }
+    .feed-time { font-size: 12px; color: var(--text-muted); }
+    .tag {
+      padding: 3px 8px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+    }
+    .tag-paid { background: rgba(0, 230, 118, 0.15); color: var(--green); border: 1px solid var(--green); }
+    .tag-due { background: rgba(255, 171, 0, 0.15); color: var(--amber); border: 1px solid var(--amber); }
+    .tag-expired { background: rgba(255, 23, 68, 0.15); color: var(--red); border: 1px solid var(--red); }
+
+    /* Member cards */
+    .member-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 16px;
+      max-height: 560px;
+      overflow-y: auto;
+    }
+    .member-card {
+      background: var(--slate);
+      border: 1px solid var(--outline);
+      border-radius: 14px;
+      padding: 14px;
+      text-align: center;
+      position: relative;
+      transition: all 0.2s;
+    }
+    .member-card:hover {
+      border-color: var(--green);
+      transform: translateY(-2px);
+    }
+    .qr-img {
+      width: 130px;
+      height: 130px;
+      border-radius: 10px;
+      background: white;
+      padding: 6px;
+      margin: 10px auto;
+      display: block;
+    }
+    .member-title { font-size: 15px; font-weight: 800; }
+    .member-sub { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+
+    /* Tables */
+    .table-container {
+      overflow-x: auto;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th {
+      background: var(--slate);
+      color: var(--text-muted);
+      text-align: left;
+      padding: 10px 14px;
+      font-weight: 700;
+      border-bottom: 1px solid var(--outline);
+    }
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    tr:hover td { background: rgba(255, 255, 255, 0.02); }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-box {
+      background: var(--surface);
+      border: 1px solid var(--outline);
+      border-radius: 18px;
+      padding: 26px;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+    .modal-title { font-size: 18px; font-weight: 800; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; }
+    .form-input {
+      width: 100%;
+      background: var(--slate);
+      border: 1px solid var(--outline);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .form-input:focus { outline: none; border-color: var(--green); }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div>
+          <h1>TITAN GYM LOCAL HUB</h1>
+          <p>Real-Time Tablet Check-in Server & Anti-Ban WhatsApp Dispatcher</p>
+        </div>
+      </div>
+      <div class="badges-row">
+        <div class="badge">
+          <div class="dot" id="ws-dot"></div>
+          <span id="ws-status">Live Connected</span>
+        </div>
+        <div class="badge" id="wa-status-badge">
+          <span>💬</span>
+          <span id="wa-status-text">WhatsApp: Idle</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tablet IP Connection Hero Banner -->
+    <div class="tablet-banner">
+      <div class="tablet-info">
+        <div class="tablet-icon">📱</div>
+        <div>
+          <div style="font-size: 12px; text-transform: uppercase; font-weight: 700; color: var(--blue);">Tablet Kiosk Connection IP</div>
+          <div class="ip-box" id="tablet-ip-display" title="Click to copy IP URL" onclick="copyIpAddress()">http://...:5000</div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+            Set this Base URL in your Tablet Kiosk settings or scan QR code
+          </div>
+        </div>
+      </div>
+      <div class="tablet-actions">
+        <button class="btn btn-blue" onclick="openQrModal()">📷 View Tablet Setup QR</button>
+        <button class="btn btn-outline" onclick="testPing()">⚡ Test Tablet Ping</button>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-title">Today's Check-ins</div>
+        <div class="kpi-value" id="kpi-checkins" style="color: var(--green);">0</div>
+        <div class="kpi-sub">Real-time scans from tablet</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">Active Members</div>
+        <div class="kpi-value" id="kpi-active" style="color: var(--blue);">0</div>
+        <div class="kpi-sub">Total registered paid members</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">Due / Expired</div>
+        <div class="kpi-value" id="kpi-due" style="color: var(--amber);">0</div>
+        <div class="kpi-sub">Candidates for WhatsApp reminder</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">WhatsApp Sent Today</div>
+        <div class="kpi-value" id="kpi-wa-sent" style="color: var(--purple);">0</div>
+        <div class="kpi-sub" id="kpi-wa-limit">Limit: 150 safe msgs/day</div>
+      </div>
+    </div>
+
+    <!-- WhatsApp Anti-Ban Automation Center -->
+    <div class="wa-center">
+      <div class="wa-header">
+        <div>
+          <h2 style="font-size: 18px; font-weight: 800; display: flex; align-items: center; gap: 8px;">
+            <span>🛡️</span> WhatsApp Anti-Ban Automation Center
+          </h2>
+          <p style="font-size: 13px; color: var(--text-muted); margin-top: 2px;">
+            Zero-concurrency queue with randomized time delays & fatigue breaks to prevent Meta number blocking
+          </p>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-primary" onclick="sendExpiryAlerts()">⚡ Send Expiry Alerts (<span id="btn-due-count">0</span>)</button>
+          <button class="btn btn-blue" onclick="openTestModal()">✉️ Test WhatsApp Dispatch</button>
+          <button class="btn btn-outline" onclick="openSettingsModal()">⚙️ Anti-Ban Settings</button>
+          <button class="btn btn-amber" id="btn-pause-toggle" onclick="togglePauseQueue()">⏸️ Pause Queue</button>
+        </div>
+      </div>
+
+      <!-- Real WhatsApp Phone Linker Card -->
+      <div id="real-wa-box" style="margin-bottom: 20px; background: rgba(0, 230, 118, 0.05); border: 1px solid rgba(0, 230, 118, 0.2); border-radius: 14px; padding: 18px 22px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <div id="real-wa-status-badge" style="width: 46px; height: 46px; border-radius: 50%; background: rgba(255, 171, 0, 0.15); color: var(--amber); display: flex; align-items: center; justify-content: center; font-size: 24px;">
+            📱
+          </div>
+          <div>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <h3 id="real-wa-title" style="font-size: 16px; font-weight: 800; margin: 0;">Real WhatsApp Engine: Waiting to Pair</h3>
+              <span id="real-wa-pill" class="tag" style="background: rgba(255, 171, 0, 0.2); color: var(--amber); font-weight: 800;">SCAN QR TO LINK PHONE</span>
+            </div>
+            <p id="real-wa-desc" style="font-size: 13px; color: var(--text-muted); margin: 4px 0 0 0;">
+              Link your WhatsApp by scanning the QR code (WhatsApp → Linked Devices) to dispatch real messages.
+            </p>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <button class="btn btn-primary" id="btn-show-wa-qr" onclick="openRealWaQrModal()">📷 View Pairing QR</button>
+          <button class="btn btn-outline" onclick="requestPairingCodePrompt()">🔢 Phone Pairing Code</button>
+          <button class="btn btn-outline" id="btn-wa-logout" style="display: none; border-color: rgba(255, 23, 68, 0.4); color: var(--red);" onclick="logoutRealWhatsApp()">🔌 Disconnect Phone</button>
+        </div>
+      </div>
+
+      <!-- Safeguard Cards -->
+      <div class="safeguard-pills">
+        <div class="safeguard-card">
+          <div class="safeguard-icon">⏱️</div>
+          <div class="safeguard-info">
+            <h4 id="pill-delay-text">Random Delay: 5s - 14s</h4>
+            <p>Non-linear jitter added per message</p>
+          </div>
+        </div>
+        <div class="safeguard-card">
+          <div class="safeguard-icon">☕</div>
+          <div class="safeguard-info">
+            <h4 id="pill-cooldown-text">Batch Fatigue: 30s Cooldown</h4>
+            <p>Rest break every 5 messages sent</p>
+          </div>
+        </div>
+        <div class="safeguard-card">
+          <div class="safeguard-icon">🔀</div>
+          <div class="safeguard-info">
+            <h4>Spintax Hash Protection</h4>
+            <p>Unique content avoids spam hashes</p>
+          </div>
+        </div>
+        <div class="safeguard-card">
+          <div class="safeguard-icon">🔒</div>
+          <div class="safeguard-info">
+            <h4 id="pill-mode-text">Mode: Safe Simulation</h4>
+            <p>100% verified timing simulation</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Countdown Progress -->
+      <div class="countdown-bar" id="countdown-bar">
+        <div class="countdown-header">
+          <span id="countdown-status">⏳ Preparing message...</span>
+          <span id="countdown-timer">0.0s remaining</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+      </div>
+
+      <!-- Queue and Logs Tabs -->
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchWaTab('queue', this)">Active Queue (<span id="wa-queue-count">0</span>)</button>
+        <button class="tab-btn" onclick="switchWaTab('logs', this)">Sent History (<span id="wa-logs-count">0</span>)</button>
+      </div>
+
+      <div class="tab-content active" id="tab-wa-queue">
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Recipient</th>
+                <th>Type</th>
+                <th>Message Content</th>
+                <th>Status</th>
+                <th>Delay</th>
+              </tr>
+            </thead>
+            <tbody id="wa-queue-tbody">
+              <tr><td colspan="6" class="empty-state">Queue is currently empty.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="tab-content" id="tab-wa-logs">
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Recipient</th>
+                <th>Type</th>
+                <th>Message Sent</th>
+                <th>Delay Used</th>
+                <th>Status</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="wa-logs-tbody">
+              <tr><td colspan="7" class="empty-state">No messages logged yet today.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Grid: Live Attendance & Member Passes -->
+    <div class="main-grid">
+      <!-- Live Attendance Feed -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2><span>📡</span> Live Tablet Attendance Feed</h2>
+          <span style="font-size: 12px; color: var(--text-muted);" id="feed-count">0 check-ins today</span>
+        </div>
+        <div class="feed-list" id="feed-list">
+          <div class="empty-state">Waiting for check-in scans from the tablet kiosk...</div>
+        </div>
+      </div>
+
+      <!-- Member QR Passes -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2><span>🎟️</span> Member Passes & Quick Scan</h2>
+          <button class="btn btn-primary" onclick="promptAddMember()">+ Register Member</button>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+          Hold tablet camera to any QR code or click <b>"⚡ Test Scan"</b> to simulate tablet check-in:
+        </p>
+        <div class="member-grid" id="member-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Setup QR Modal -->
+  <div class="modal-overlay" id="qr-modal">
+    <div class="modal-box" style="text-align: center;">
+      <div class="modal-title" style="justify-content: center;">📱 Tablet Kiosk Quick Connect</div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+        Point your Tablet's camera at this QR code to automatically configure the Host IP:
+      </p>
+      <img id="modal-qr-img" style="width: 240px; height: 240px; border-radius: 12px; background: white; padding: 10px; margin: 0 auto 14px; display: block;" src="" alt="Setup QR Code" />
+      <div class="ip-box" id="modal-ip-text">http://...:5000</div>
+      <div class="modal-actions" style="justify-content: center; margin-top: 20px;">
+        <button class="btn btn-outline" onclick="closeModal('qr-modal')">Close</button>
+        <button class="btn btn-blue" onclick="copyIpAddress()">Copy IP URL</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Anti-Ban Settings Modal -->
+  <div class="modal-overlay" id="settings-modal">
+    <div class="modal-box">
+      <div class="modal-title">⚙️ Anti-Ban Engine Settings</div>
+      <div class="form-group">
+        <label>Minimum Delay (seconds between messages)</label>
+        <input class="form-input" type="number" id="cfg-min-delay" min="2" max="30" value="5" />
+      </div>
+      <div class="form-group">
+        <label>Maximum Delay (seconds between messages)</label>
+        <input class="form-input" type="number" id="cfg-max-delay" min="5" max="60" value="14" />
+      </div>
+      <div class="form-group">
+        <label>Batch Size (messages sent before cooldown)</label>
+        <input class="form-input" type="number" id="cfg-burst-size" min="2" max="15" value="5" />
+      </div>
+      <div class="form-group">
+        <label>Cooldown Break Duration (seconds of fatigue pause)</label>
+        <input class="form-input" type="number" id="cfg-cooldown" min="10" max="120" value="30" />
+      </div>
+      <div class="form-group">
+        <label>Daily Safety Cap (max safe messages/day)</label>
+        <input class="form-input" type="number" id="cfg-daily-limit" min="10" max="500" value="150" />
+      </div>
+      <div class="form-group">
+        <label>Provider Mode</label>
+        <select class="form-input" id="cfg-provider-mode">
+          <option value="real_whatsapp">Real WhatsApp (Linked Device via Phone QR - Real Delivery)</option>
+          <option value="simulation">Safe Simulation Mode (Zero Network Calls)</option>
+          <option value="gateway">HTTP Gateway (UltraMsg / Cloud Webhook)</option>
+        </select>
+      </div>
+      <div class="form-group" id="cfg-gateway-url-group" style="display: none;">
+        <label>Gateway Webhook URL</label>
+        <input class="form-input" type="text" id="cfg-gateway-url" placeholder="http://localhost:3000/send" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeModal('settings-modal')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveSettings()">Save Configuration</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Real WhatsApp QR Pairing Modal -->
+  <div class="modal-overlay" id="real-wa-qr-modal">
+    <div class="modal-box" style="text-align: center; max-width: 440px;">
+      <div class="modal-title" style="justify-content: center;">📱 Link WhatsApp for Real Sending</div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+        Open WhatsApp on your phone → Settings / Menu → <b>Linked Devices</b> → <b>Link a Device</b> → Scan this QR:
+      </p>
+      <div style="background: white; border-radius: 12px; padding: 14px; display: inline-block; margin-bottom: 14px; min-width: 250px; min-height: 250px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+        <img id="real-wa-modal-qr-img" style="width: 240px; height: 240px; display: none; margin: 0 auto; border-radius: 6px;" src="" alt="WhatsApp QR" />
+        <div id="real-wa-modal-qr-loader" style="padding: 85px 10px; color: #555; font-size: 13px;">
+          <span style="display: block; font-size: 28px; margin-bottom: 8px;">⏳</span>
+          Generating WhatsApp QR Code...
+        </div>
+      </div>
+      <div id="real-wa-modal-status-text" style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+        Waiting for device scan... QR code updates in real-time.
+      </div>
+      <div class="modal-actions" style="justify-content: center; gap: 10px;">
+        <button class="btn btn-outline" onclick="triggerRealWaRefresh()">🔄 Force Refresh QR</button>
+        <button class="btn btn-primary" onclick="closeModal('real-wa-qr-modal')">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Test Dispatch Modal -->
+  <div class="modal-overlay" id="test-modal">
+    <div class="modal-box">
+      <div class="modal-title">✉️ Dispatch Test WhatsApp Message</div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+        Sends a test message via your Real WhatsApp or Anti-Ban Queue.
+      </p>
+      <div class="form-group">
+        <label>Recipient Phone Number (International format e.g. +92 300 1234567)</label>
+        <input class="form-input" type="text" id="test-phone-input" value="+92 300 8472910" />
+      </div>
+      <div class="form-group">
+        <label>Dispatch Mode</label>
+        <select class="form-input" id="test-dispatch-mode">
+          <option value="queue">Anti-Ban Queue (Recommended: Randomized delay 5s-14s)</option>
+          <option value="immediate">Immediate Direct Dispatch (Real WhatsApp now)</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeModal('test-modal')">Cancel</button>
+        <button class="btn btn-primary" onclick="sendTestMessage()">Send Test Message</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let checkinCount = 0;
+    let currentServerBase = '';
+    let countdownInterval = null;
+
+    // Connect WebSocket
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    let ws = new WebSocket(wsUrl);
+
+    function initWebSocket() {
+      ws.onopen = () => {
+        document.getElementById('ws-status').textContent = 'Live Connected';
+        document.getElementById('ws-dot').style.background = 'var(--green)';
+      };
+
+      ws.onclose = () => {
+        document.getElementById('ws-status').textContent = 'Reconnecting...';
+        document.getElementById('ws-dot').style.background = 'var(--amber)';
+        setTimeout(() => {
+          ws = new WebSocket(wsUrl);
+          initWebSocket();
+        }, 3000);
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === 'init') {
+          renderFeed(msg.data.recentAttendance);
+          document.getElementById('kpi-checkins').textContent = msg.data.totalCheckinsToday;
+          if (msg.data.whatsappStatus) updateWaEngineStatus(msg.data.whatsappStatus);
+        } else if (msg.type === 'attendance:new') {
+          addAttendanceItem(msg.data, true);
+          checkinCount++;
+          document.getElementById('kpi-checkins').textContent = checkinCount;
+        } else if (msg.type === 'member:new' || msg.type === 'member:updated') {
+          loadMembers();
+          loadStats();
+        } else if (msg.type === 'whatsapp:waiting') {
+          showCountdown(msg.data.delaySeconds, msg.data.recipient);
+          loadWaQueue();
+        } else if (msg.type === 'whatsapp:cooldown') {
+          showCooldown(msg.data.cooldownSeconds);
+          loadWaQueue();
+        } else if (msg.type === 'whatsapp:completed') {
+          hideCountdown();
+          loadWaQueue();
+          loadWaLogs();
+          loadStats();
+        } else if (msg.type === 'whatsapp:queued') {
+          loadWaQueue();
+        } else if (msg.type === 'whatsapp:paused' || msg.type === 'whatsapp:resumed') {
+          loadWaStatus();
+        } else if (msg.type === 'whatsapp:real:qr') {
+          handleRealWaQrUpdate(msg.data);
+        } else if (msg.type === 'whatsapp:real:connected') {
+          handleRealWaConnected(msg.data);
+        } else if (msg.type === 'whatsapp:real:logged_out' || msg.type === 'whatsapp:real:status') {
+          loadRealWaStatus();
+        }
+      };
+    }
+    initWebSocket();
+
+    // ── Tablet IP & Network Setup ───────────────────────────────────────────
+    async function loadNetworkInfo() {
+      try {
+        const res = await fetch('/api/network/info');
+        const data = await res.json();
+        if (data.success) {
+          currentServerBase = data.baseUrl;
+          document.getElementById('tablet-ip-display').textContent = data.baseUrl;
+          document.getElementById('modal-ip-text').textContent = data.baseUrl;
+          if (data.configQr) {
+            document.getElementById('modal-qr-img').src = data.configQr;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load network info:', err);
+      }
+    }
+
+    function copyIpAddress() {
+      if (!currentServerBase) return;
+      navigator.clipboard.writeText(currentServerBase);
+      alert(`Copied Tablet Host Base URL to clipboard:\n${currentServerBase}`);
+    }
+
+    async function testPing() {
+      const start = Date.now();
+      try {
+        const res = await fetch('/api/ping');
+        const data = await res.json();
+        const latency = Date.now() - start;
+        alert(`⚡ Tablet Ping Successful!\nServer IP: ${data.primaryIp}\nLatency: ${latency}ms\nStatus: Online & Ready for Tablet Kiosk`);
+      } catch (e) {
+        alert('Ping failed: ' + e);
+      }
+    }
+
+    // ── Feed Rendering ──────────────────────────────────────────────────────
+    function addAttendanceItem(item, prepend = false) {
+      const list = document.getElementById('feed-list');
+      if (list.querySelector('.empty-state')) {
+        list.innerHTML = '';
+      }
+
+      const div = document.createElement('div');
+      div.className = 'feed-item';
+      const time = new Date(item.scanned_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const tagClass = item.status === 'paid' ? 'tag-paid' : (item.status === 'due' ? 'tag-due' : 'tag-expired');
+
+      div.innerHTML = `
+        <div>
+          <div class="feed-name">${item.member_name}</div>
+          <div class="feed-time">Scanned at ${time} • Token: ${item.qr_token}</div>
+        </div>
+        <div class="tag ${tagClass}">${item.status.toUpperCase()}</div>
+      `;
+
+      if (prepend) list.prepend(div);
+      else list.appendChild(div);
+    }
+
+    function renderFeed(items) {
+      const list = document.getElementById('feed-list');
+      list.innerHTML = '';
+      if (!items || items.length === 0) {
+        list.innerHTML = '<div class="empty-state">No check-ins yet today.</div>';
+        return;
+      }
+      items.forEach(item => addAttendanceItem(item));
+      document.getElementById('feed-count').textContent = `${items.length} check-ins today`;
+      checkinCount = items.length;
+    }
+
+    // ── Members & QR Code Passes ────────────────────────────────────────────
+    async function loadMembers() {
+      try {
+        const res = await fetch('/api/members');
+        const json = await res.json();
+        const grid = document.getElementById('member-grid');
+        grid.innerHTML = '';
+
+        if (!json.members || json.members.length === 0) {
+          grid.innerHTML = '<div class="empty-state">No members found.</div>';
+          return;
+        }
+
+        json.members.forEach(m => {
+          const card = document.createElement('div');
+          card.className = 'member-card';
+          const tagClass = m.status === 'paid' ? 'tag-paid' : (m.status === 'due' ? 'tag-due' : 'tag-expired');
+
+          card.innerHTML = `
+            <div class="member-title">${m.name}</div>
+            <div class="member-sub">${m.plan} • Expires: ${m.expiry_date}</div>
+            <span class="tag ${tagClass}">${m.status.toUpperCase()}</span>
+            <img class="qr-img" src="/qrcodes/${m.qr_token}.png" alt="${m.name} QR Code" />
+            <div style="font-size: 11px; font-family: monospace; color: var(--text-muted); margin-bottom: 8px;">${m.qr_token}</div>
+            <div style="display: flex; gap: 6px; justify-content: center;">
+              <button class="btn btn-primary" style="font-size: 11px; padding: 4px 10px;" onclick="simulateScan('${m.qr_token}')">⚡ Test Scan</button>
+              <a class="btn btn-outline" style="font-size: 11px; padding: 4px 10px; text-decoration: none;" href="/qrcodes/${m.qr_token}.png" download="${m.name.replace(/\\s+/g, '_')}_QR.png">Save QR</a>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+      } catch (err) {
+        console.error('Failed to load members:', err);
+      }
+    }
+
+    async function simulateScan(qrToken) {
+      try {
+        const res = await fetch('/api/attendance/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ qr_token: qrToken, scanned_at: new Date().toISOString() })
+        });
+        const data = await res.json();
+        if (data.success) {
+          console.log('Simulated scan response:', data);
+        } else {
+          alert('Scan failed: ' + data.message);
+        }
+      } catch (e) {
+        alert('Scan error: ' + e);
+      }
+    }
+
+    async function promptAddMember() {
+      const name = prompt('Enter Member Name:');
+      if (!name) return;
+      const phone = prompt('Enter Phone Number (e.g. +92 300 1234567):', '+92 300 8472910');
+      const plan = prompt('Enter Plan (Basic Plan, Silver Plan, Gold Plan):', 'Gold Plan');
+      const status = confirm('Is membership paid? (OK = Paid, Cancel = Due)') ? 'paid' : 'due';
+
+      try {
+        const res = await fetch('/api/members/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, phone, plan, status, send_welcome: true })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert(`✓ Member ${data.member.name} registered with QR: ${data.member.qr_token}!\nPersonalized WhatsApp welcome message enqueued into Anti-Ban queue!`);
+          loadMembers();
+          loadStats();
+          loadWaQueue();
+        }
+      } catch (e) {
+        alert('Failed to register: ' + e);
+      }
+    }
+
+    // ── WhatsApp Anti-Ban Automation ────────────────────────────────────────
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/stats');
+        const json = await res.json();
+        if (json.stats) {
+          document.getElementById('kpi-active').textContent = json.stats.activeMembers;
+          document.getElementById('kpi-due').textContent = json.stats.dueMembers + json.stats.expiredMembers;
+          document.getElementById('btn-due-count').textContent = json.stats.dueMembers + json.stats.expiredMembers;
+          document.getElementById('kpi-wa-sent').textContent = json.stats.whatsappSentToday;
+        }
+      } catch (err) {}
+    }
+
+    async function loadWaStatus() {
+      try {
+        const res = await fetch('/api/whatsapp/status');
+        const data = await res.json();
+        if (data.success) {
+          updateWaEngineStatus(data);
+        }
+      } catch (e) {}
+    }
+
+    function updateWaEngineStatus(st) {
+      const badge = document.getElementById('wa-status-text');
+      const pauseBtn = document.getElementById('btn-pause-toggle');
+
+      if (st.isPaused) {
+        badge.textContent = 'WhatsApp: Paused';
+        badge.style.color = 'var(--amber)';
+        pauseBtn.textContent = '▶️ Resume Queue';
+        pauseBtn.className = 'btn btn-primary';
+      } else {
+        badge.textContent = `WhatsApp: ${st.status.toUpperCase()}`;
+        badge.style.color = st.status === 'cooldown' ? 'var(--amber)' : (st.status === 'waiting' ? 'var(--blue)' : 'var(--green)');
+        pauseBtn.textContent = '⏸️ Pause Queue';
+        pauseBtn.className = 'btn btn-amber';
+      }
+
+      if (st.settings) {
+        document.getElementById('pill-delay-text').textContent = `Random Delay: ${st.settings.min_delay_sec}s - ${st.settings.max_delay_sec}s`;
+        document.getElementById('pill-cooldown-text').textContent = `Batch Fatigue: ${st.settings.cooldown_sec}s Cooldown`;
+        document.getElementById('pill-mode-text').textContent = `Mode: ${st.settings.provider_mode.toUpperCase()}`;
+        document.getElementById('kpi-wa-limit').textContent = `Limit: ${st.settings.daily_limit} safe msgs/day`;
+      }
+    }
+
+    function showCountdown(totalSec, recipient) {
+      const bar = document.getElementById('countdown-bar');
+      const status = document.getElementById('countdown-status');
+      const timer = document.getElementById('countdown-timer');
+      const fill = document.getElementById('progress-fill');
+
+      bar.style.display = 'block';
+      status.innerHTML = `🛡️ Anti-ban random delay active • Dispatching to <b>+${recipient}</b>`;
+      let remaining = totalSec;
+
+      clearInterval(countdownInterval);
+      fill.style.width = '0%';
+
+      const start = Date.now();
+      const totalMs = totalSec * 1000;
+
+      countdownInterval = setInterval(() => {
+        const elapsed = Date.now() - start;
+        const left = Math.max(0, (totalMs - elapsed) / 1000);
+        timer.textContent = `${left.toFixed(1)}s remaining`;
+        const pct = Math.min(100, (elapsed / totalMs) * 100);
+        fill.style.width = `${pct}%`;
+
+        if (elapsed >= totalMs) {
+          clearInterval(countdownInterval);
+          status.textContent = '⚡ Dispatching message now...';
+        }
+      }, 100);
+    }
+
+    function showCooldown(totalSec) {
+      const bar = document.getElementById('countdown-bar');
+      const status = document.getElementById('countdown-status');
+      const timer = document.getElementById('countdown-timer');
+      const fill = document.getElementById('progress-fill');
+
+      bar.style.display = 'block';
+      status.innerHTML = `☕ <b>Fatigue Cooldown Break:</b> Human mimicry pause to avoid spam block...`;
+      let remaining = totalSec;
+
+      clearInterval(countdownInterval);
+      const start = Date.now();
+      const totalMs = totalSec * 1000;
+
+      countdownInterval = setInterval(() => {
+        const elapsed = Date.now() - start;
+        const left = Math.max(0, (totalMs - elapsed) / 1000);
+        timer.textContent = `${left.toFixed(1)}s rest`;
+        fill.style.width = `${(elapsed / totalMs) * 100}%`;
+        if (elapsed >= totalMs) {
+          clearInterval(countdownInterval);
+        }
+      }, 100);
+    }
+
+    function hideCountdown() {
+      clearInterval(countdownInterval);
+      document.getElementById('countdown-bar').style.display = 'none';
+    }
+
+    async function loadWaQueue() {
+      try {
+        const res = await fetch('/api/whatsapp/queue');
+        const json = await res.json();
+        const tbody = document.getElementById('wa-queue-tbody');
+        document.getElementById('wa-queue-count').textContent = json.pendingCount;
+
+        if (!json.queue || json.queue.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Queue is currently empty.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = json.queue.map(q => `
+          <tr>
+            <td>#${q.id}</td>
+            <td><b>+${q.recipient_phone}</b></td>
+            <td><span class="tag" style="background: rgba(0, 176, 255, 0.15); color: var(--blue);">${q.message_type}</span></td>
+            <td style="max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${q.message_text.replace(/\\n/g, ' ')}</td>
+            <td><span class="tag ${q.status === 'sent' ? 'tag-paid' : (q.status === 'pending' ? 'tag-due' : 'tag-expired')}">${q.status.toUpperCase()}</span></td>
+            <td>${q.delay_seconds ? q.delay_seconds + 's' : '—'}</td>
+          </tr>
+        `).join('');
+      } catch (e) {}
+    }
+
+    async function loadWaLogs() {
+      try {
+        const res = await fetch('/api/whatsapp/logs');
+        const json = await res.json();
+        const tbody = document.getElementById('wa-logs-tbody');
+        document.getElementById('wa-logs-count').textContent = json.logs.length;
+
+        if (!json.logs || json.logs.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No messages logged yet today.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = json.logs.map(l => {
+          const time = new Date(l.created_at).toLocaleTimeString();
+          return `
+            <tr>
+              <td>#${l.id}</td>
+              <td><b>+${l.recipient_phone}</b></td>
+              <td><span class="tag" style="background: rgba(124, 77, 255, 0.15); color: var(--purple);">${l.message_type}</span></td>
+              <td style="max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${l.message_text.replace(/\\n/g, ' ')}</td>
+              <td><span style="color: var(--green); font-weight: bold;">${l.delay_used_sec}s random</span></td>
+              <td><span class="tag ${l.status === 'sent' ? 'tag-paid' : 'tag-expired'}">${l.status.toUpperCase()}</span></td>
+              <td style="color: var(--text-muted);">${time}</td>
+            </tr>
+          `;
+        }).join('');
+      } catch (e) {}
+    }
+
+    async function sendExpiryAlerts() {
+      if (!confirm('Enqueue automatic anti-ban WhatsApp reminders for all due and expired members? Each message will be dispatched with random time delays to avoid number blocking.')) return;
+
+      try {
+        const res = await fetch('/api/whatsapp/send-expiry-alerts', { method: 'POST' });
+        const json = await res.json();
+        alert(`✓ ${json.count} personalized expiry reminders added to Anti-Ban Queue!\nWatch the live queue and countdown timer.`);
+        loadWaQueue();
+        loadStats();
+      } catch (e) {
+        alert('Failed: ' + e);
+      }
+    }
+
+    // ── Real WhatsApp Web Integration ────────────────────────────────────────
+    let currentRealWaQr = null;
+
+    async function loadRealWaStatus() {
+      try {
+        const res = await fetch('/api/whatsapp/real/status');
+        const data = await res.json();
+        updateRealWaUI(data);
+      } catch (err) {}
+    }
+
+    function updateRealWaUI(data) {
+      const box = document.getElementById('real-wa-box');
+      const badge = document.getElementById('real-wa-status-badge');
+      const title = document.getElementById('real-wa-title');
+      const pill = document.getElementById('real-wa-pill');
+      const desc = document.getElementById('real-wa-desc');
+      const qrBtn = document.getElementById('btn-show-wa-qr');
+      const logoutBtn = document.getElementById('btn-wa-logout');
+
+      if (data.isConnected && data.connectedUser) {
+        box.style.background = 'rgba(0, 230, 118, 0.08)';
+        box.style.borderColor = 'rgba(0, 230, 118, 0.4)';
+        badge.style.background = 'rgba(0, 230, 118, 0.2)';
+        badge.style.color = 'var(--green)';
+        badge.innerHTML = '✅';
+        title.innerHTML = `Real WhatsApp Connected: <b>+${data.connectedUser.phone}</b>`;
+        pill.className = 'tag tag-paid';
+        pill.textContent = 'ONLINE & READY';
+        desc.textContent = `Authenticated as ${data.connectedUser.name || 'Gym WhatsApp'}. All real outbound messages will dispatch from this device!`;
+        qrBtn.style.display = 'none';
+        logoutBtn.style.display = 'inline-flex';
+        closeModal('real-wa-qr-modal');
+      } else if (data.status === 'connecting') {
+        badge.style.background = 'rgba(0, 176, 255, 0.15)';
+        badge.style.color = 'var(--blue)';
+        badge.innerHTML = '🔄';
+        title.textContent = 'Real WhatsApp: Initializing / Connecting...';
+        pill.className = 'tag';
+        pill.style.background = 'rgba(0, 176, 255, 0.2)';
+        pill.style.color = 'var(--blue)';
+        pill.textContent = 'CONNECTING';
+        desc.textContent = 'Connecting to WhatsApp Multi-Device network...';
+        qrBtn.style.display = 'inline-flex';
+        logoutBtn.style.display = 'none';
+      } else {
+        badge.style.background = 'rgba(255, 171, 0, 0.15)';
+        badge.style.color = 'var(--amber)';
+        badge.innerHTML = '📱';
+        title.textContent = 'Real WhatsApp Engine: Waiting to Link Phone';
+        pill.className = 'tag tag-due';
+        pill.textContent = 'SCAN QR TO PAIR';
+        desc.textContent = 'Scan the pairing QR code with your phone (WhatsApp → Linked Devices) to send real messages.';
+        qrBtn.style.display = 'inline-flex';
+        logoutBtn.style.display = 'none';
+
+        if (data.qrCodeDataUrl) {
+          currentRealWaQr = data.qrCodeDataUrl;
+          const img = document.getElementById('real-wa-modal-qr-img');
+          const loader = document.getElementById('real-wa-modal-qr-loader');
+          if (img && loader) {
+            img.src = data.qrCodeDataUrl;
+            img.style.display = 'block';
+            loader.style.display = 'none';
+          }
+        }
+      }
+    }
+
+    function handleRealWaQrUpdate(data) {
+      if (data && data.qrCodeDataUrl) {
+        currentRealWaQr = data.qrCodeDataUrl;
+        const img = document.getElementById('real-wa-modal-qr-img');
+        const loader = document.getElementById('real-wa-modal-qr-loader');
+        const statusText = document.getElementById('real-wa-modal-status-text');
+        if (img && loader) {
+          img.src = data.qrCodeDataUrl;
+          img.style.display = 'block';
+          loader.style.display = 'none';
+        }
+        if (statusText) statusText.textContent = 'Fresh QR code generated. Scan now with your WhatsApp!';
+      }
+      loadRealWaStatus();
+    }
+
+    function handleRealWaConnected(data) {
+      loadRealWaStatus();
+      alert(`🎉 Real WhatsApp Linked Successfully!\nConnected as +${data.user.phone} (${data.user.name})`);
+    }
+
+    async function openRealWaQrModal() {
+      document.getElementById('real-wa-qr-modal').style.display = 'flex';
+      const img = document.getElementById('real-wa-modal-qr-img');
+      const loader = document.getElementById('real-wa-modal-qr-loader');
+      if (currentRealWaQr) {
+        img.src = currentRealWaQr;
+        img.style.display = 'block';
+        loader.style.display = 'none';
+      } else {
+        img.style.display = 'none';
+        loader.style.display = 'block';
+      }
+      try {
+        const res = await fetch('/api/whatsapp/real/qr');
+        const json = await res.json();
+        updateRealWaUI(json);
+      } catch (_) {}
+    }
+
+    async function triggerRealWaRefresh() {
+      try {
+        document.getElementById('real-wa-modal-status-text').textContent = 'Requesting fresh WhatsApp QR...';
+        const img = document.getElementById('real-wa-modal-qr-img');
+        const loader = document.getElementById('real-wa-modal-qr-loader');
+        img.style.display = 'none';
+        loader.style.display = 'block';
+        await fetch('/api/whatsapp/real/start', { method: 'POST' });
+      } catch (e) {
+        alert('Refresh failed: ' + e);
+      }
+    }
+
+    async function logoutRealWhatsApp() {
+      if (!confirm('Disconnect this phone from the Gym System WhatsApp engine? You will need to re-scan a QR code to link again.')) return;
+      try {
+        await fetch('/api/whatsapp/real/logout', { method: 'POST' });
+        loadRealWaStatus();
+        alert('Logged out. Session cleared.');
+      } catch (e) {
+        alert('Logout failed: ' + e);
+      }
+    }
+
+    async function requestPairingCodePrompt() {
+      const phone = prompt('Enter your WhatsApp phone number with country code (e.g. +92 300 1234567):');
+      if (!phone) return;
+      try {
+        const res = await fetch('/api/whatsapp/real/pairing-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone }),
+        });
+        const json = await res.json();
+        if (json.success && json.code) {
+          alert(`🔢 YOUR WHATSAPP PAIRING CODE:\n\n${json.code}\n\n1. Open WhatsApp on your phone\n2. Settings -> Linked Devices -> Link with phone number\n3. Enter this code to link!`);
+        } else {
+          alert('Could not generate pairing code: ' + (json.error || 'Check server logs'));
+        }
+      } catch (e) {
+        alert('Pairing code request failed: ' + e);
+      }
+    }
+
+    async function sendTestMessage() {
+      const phone = document.getElementById('test-phone-input').value.trim();
+      const mode = document.getElementById('test-dispatch-mode').value;
+      if (!phone) return alert('Please enter phone number');
+      closeModal('test-modal');
+
+      try {
+        if (mode === 'immediate') {
+          const res = await fetch('/api/whatsapp/send-real', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              phone,
+              text: '{Salam|Hello} Member! ⚡ Verified direct dispatch from Titan Gym System. Real message delivery confirmed!',
+              immediate: true,
+            })
+          });
+          const data = await res.json();
+          if (data.success) {
+            alert(`✓ Real WhatsApp message dispatched directly to ${phone}!\nMessage ID: ${data.result ? data.result.messageId : 'OK'}`);
+          } else {
+            alert('Direct send failed: ' + (data.error || 'Check connection'));
+          }
+        } else {
+          const res = await fetch('/api/whatsapp/send-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone })
+          });
+          const data = await res.json();
+          if (data.success) {
+            loadWaQueue();
+          }
+        }
+      } catch (e) {
+        alert('Test failed: ' + e);
+      }
+    }
+
+    async function togglePauseQueue() {
+      try {
+        const st = await (await fetch('/api/whatsapp/status')).json();
+        const action = st.isPaused ? 'resume' : 'pause';
+        await fetch(`/api/whatsapp/${action}`, { method: 'POST' });
+        loadWaStatus();
+      } catch (e) {}
+    }
+
+    // Settings Modal
+    async function openSettingsModal() {
+      try {
+        const res = await fetch('/api/whatsapp/settings');
+        const json = await res.json();
+        if (json.settings) {
+          document.getElementById('cfg-min-delay').value = json.settings.min_delay_sec;
+          document.getElementById('cfg-max-delay').value = json.settings.max_delay_sec;
+          document.getElementById('cfg-burst-size').value = json.settings.burst_batch_size;
+          document.getElementById('cfg-cooldown').value = json.settings.cooldown_sec;
+          document.getElementById('cfg-daily-limit').value = json.settings.daily_limit;
+          document.getElementById('cfg-provider-mode').value = json.settings.provider_mode;
+          document.getElementById('cfg-gateway-url').value = json.settings.gateway_url || '';
+
+          const isGateway = json.settings.provider_mode === 'gateway';
+          document.getElementById('cfg-gateway-url-group').style.display = isGateway ? 'block' : 'none';
+        }
+        document.getElementById('settings-modal').style.display = 'flex';
+      } catch (e) {}
+    }
+
+    document.getElementById('cfg-provider-mode').addEventListener('change', (e) => {
+      document.getElementById('cfg-gateway-url-group').style.display = e.target.value === 'gateway' ? 'block' : 'none';
+    });
+
+    async function saveSettings() {
+      const body = {
+        min_delay_sec: document.getElementById('cfg-min-delay').value,
+        max_delay_sec: document.getElementById('cfg-max-delay').value,
+        burst_batch_size: document.getElementById('cfg-burst-size').value,
+        cooldown_sec: document.getElementById('cfg-cooldown').value,
+        daily_limit: document.getElementById('cfg-daily-limit').value,
+        provider_mode: document.getElementById('cfg-provider-mode').value,
+        gateway_url: document.getElementById('cfg-gateway-url').value,
+      };
+
+      try {
+        await fetch('/api/whatsapp/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        closeModal('settings-modal');
+        loadWaStatus();
+      } catch (e) {
+        alert('Failed to save settings: ' + e);
+      }
+    }
+
+    function switchWaTab(tab, btn) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(`tab-wa-${tab}`).classList.add('active');
+    }
+
+    function openQrModal() { document.getElementById('qr-modal').style.display = 'flex'; }
+    function openTestModal() { document.getElementById('test-modal').style.display = 'flex'; }
+    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+    // Init page
+    loadNetworkInfo();
+    loadMembers();
+    loadStats();
+    loadWaStatus();
+    loadRealWaStatus();
+    loadWaQueue();
+    loadWaLogs();
+  </script>
+</body>
+</html>

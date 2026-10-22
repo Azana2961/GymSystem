@@ -45,10 +45,10 @@ class RevenueChart extends StatelessWidget {
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
-                        reservedSize: 40,
+                        reservedSize: 50,
                         getTitlesWidget: (double value, TitleMeta meta) {
                           if (value == 0) return const SizedBox.shrink();
-                          return Text('\$${(value / 1000).toInt()}k', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12));
+                          return Text('Rs. ${(value / 1000).toInt()}k', style: const TextStyle(color: AppColors.textSecondary, fontSize: 11));
                         },
                       ),
                     ),

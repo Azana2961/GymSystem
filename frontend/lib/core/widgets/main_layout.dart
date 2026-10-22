@@ -4,7 +4,6 @@ import 'package:gym_system/features/dashboard/views/dashboard_screen.dart';
 import 'package:gym_system/features/members/views/members_screen.dart';
 import 'package:gym_system/features/analytics/views/analytics_screen.dart';
 import 'package:gym_system/features/settings/views/settings_screen.dart';
-import 'package:gym_system/core/theme/colors.dart';
 
 class MainLayout extends StatefulWidget {
   const MainLayout({super.key});
@@ -36,11 +35,12 @@ class _MainLayoutState extends State<MainLayout> {
               });
             },
           ),
-          const VerticalDivider(width: 1, thickness: 1, color: AppColors.border),
           Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              child: _pages[_selectedIndex],
+            child: RepaintBoundary(
+              child: IndexedStack(
+                index: _selectedIndex,
+                children: _pages,
+              ),
             ),
           ),
         ],

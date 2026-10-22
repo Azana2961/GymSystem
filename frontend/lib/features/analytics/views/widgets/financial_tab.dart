@@ -120,15 +120,28 @@ class FinancialTab extends StatelessWidget {
                           itemCount: 10,
                           separatorBuilder: (context, index) => const Divider(),
                           itemBuilder: (context, index) {
+                            const pkDefaulters = [
+                              'Usman Khalid',
+                              'Bilal Ahmed',
+                              'Hamza Tariq',
+                              'Zeeshan Malik',
+                              'Talha Sheikh',
+                              'Fahad Mustafa',
+                              'Haris Rauf',
+                              'Saad Farooq',
+                              'Zain ul Abidin',
+                              'Shoaib Akhtar',
+                            ];
+                            final name = pkDefaulters[index % pkDefaulters.length];
                             return ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: CircleAvatar(
                                 backgroundColor: AppColors.error.withValues(alpha: 0.2),
                                 child: Text('M${index + 1}', style: const TextStyle(color: AppColors.error, fontSize: 12, fontWeight: FontWeight.bold)),
                               ),
-                              title: Text('Defaulter Name ${index + 1}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                              title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                               subtitle: const Text('Overdue by 15 days', style: TextStyle(fontSize: 12)),
-                              trailing: Text('PKR ${15000 - (index * 1000)}', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.error)),
+                              trailing: Text('Rs. ${15000 - (index * 1000)}', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.error)),
                               onTap: () {
                                 // Clickable list as requested
                               },

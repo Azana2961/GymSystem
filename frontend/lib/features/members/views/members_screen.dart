@@ -14,12 +14,12 @@ class MembersScreen extends StatefulWidget {
 }
 
 class _MembersScreenState extends State<MembersScreen> {
-  final MembersProvider _provider = MembersProvider();
+  final MembersProvider _provider = MembersProvider.instance;
 
   @override
-  void dispose() {
-    _provider.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _provider.refresh();
   }
 
   @override

@@ -34,7 +34,13 @@ class MembersHeader extends StatelessWidget {
                 style: const TextStyle(color: AppColors.textPrimary),
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 10),
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded, color: AppColors.primary),
+              tooltip: 'Sync with SQLite Database',
+              onPressed: () => provider.refresh(),
+            ),
+            const SizedBox(width: 10),
             ElevatedButton.icon(
               onPressed: () {
                 showDialog(
