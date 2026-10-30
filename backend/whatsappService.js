@@ -1,7 +1,10 @@
 const db = require('./db');
 const http = require('http');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
 const realWhatsAppManager = require('./realWhatsapp');
+const { QR_DIR } = require('./qrService');
 
 /**
  * Intelligent WhatsApp Queue & Anti-Ban Delivery Engine
@@ -62,7 +65,28 @@ class WhatsAppService {
       allow_simulation_fallback: 'true',
       gateway_url: '',
       gateway_api_key: '',
-      gym_name: 'Titan Gym',
+      gym_name: 'Lá Fitness',
+      template_welcome:
+        '{Salam|Hello|Welcome} {name}! 👋\n' +
+        'Thank you for joining *{gym_name}*! Your *{plan}* membership pass is active and valid until *{expiry_date}*.\n' +
+        'Your Member ID is *{id}*.\n' +
+        'Scan the attached Digital Membership Pass QR code at the front desk kiosk for entry! 💪',
+      template_due:
+        '{Salam|Hello|Dear} {name}! ⚠️\n' +
+        'Friendly reminder from *{gym_name}*.\n' +
+        'Your *{plan}* membership is due for renewal on *{expiry_date}*.\n' +
+        'Kindly visit reception to renew and keep your gym access uninterrupted. Stay strong! 🏋️',
+      template_expired:
+        '{Salam|Hello|Dear} {name}!\n' +
+        'Your *{plan}* membership at *{gym_name}* has *expired* as of *{expiry_date}*.\n' +
+        'Visit reception today to reactivate your membership pass. We hope to see you back on the gym floor soon! 💪',
+      template_receipt:
+        '{Salam|Hello} {name}! 🧾\n' +
+        'Payment confirmed at *{gym_name}*.\n' +
+        'Plan: *{plan}*\n' +
+        'Amount Paid: *Rs. {amount}* ({method})\n' +
+        'Valid Until: *{expiry_date}*\n' +
+        'Thank you for training with us! 🔥',
     };
 
     const current = db.getAllSettings();
@@ -70,6 +94,13 @@ class WhatsAppService {
       if (!current[k]) {
         db.setSetting(k, v);
       }
+    }
+    // Always upgrade legacy 'simulation' mode to 'real_whatsapp'
+    if (current.provider_mode === 'simulation' || realWhatsAppManager.hasStoredSession()) {
+      db.setSetting('provider_mode', 'real_whatsapp');
+    }
+    if (!current.gym_name || current.gym_name === 'Titan Gym') {
+      db.setSetting('gym_name', 'Lá Fitness');
     }
     this.isPaused = db.getSetting('is_paused', 'false') === 'true';
   }
@@ -86,7 +117,11 @@ class WhatsAppService {
       allow_simulation_fallback: db.getSetting('allow_simulation_fallback', 'true') === 'true',
       gateway_url: db.getSetting('gateway_url', ''),
       gateway_api_key: db.getSetting('gateway_api_key', ''),
-      gym_name: db.getSetting('gym_name', 'Titan Gym'),
+      gym_name: db.getSetting('gym_name', 'Lá Fitness'),
+      template_welcome: db.getSetting('template_welcome', ''),
+      template_due: db.getSetting('template_due', ''),
+      template_expired: db.getSetting('template_expired', ''),
+      template_receipt: db.getSetting('template_receipt', ''),
     };
   }
 
@@ -142,7 +177,7 @@ class WhatsAppService {
   renderMessage(template, data = {}) {
     let msg = template || '';
     const defaultData = {
-      gym_name: this.getSettings().gym_name || 'Titan Gym',
+      gym_name: this.getSettings().gym_name || 'Lá Fitness',
       name: 'Valued Member',
       plan: 'Membership',
       expiry_date: '',
@@ -174,24 +209,57 @@ class WhatsAppService {
   }
 
   /**
-   * Enqueues a message into the persistent SQLite queue
+   * Enqueues a message (with optional Pass Card / QR Image) into the persistent SQLite queue
    */
-  enqueue({ member_id = null, recipient_phone, message_text, message_type = 'custom' }) {
+  enqueue({
+    member_id = null,
+    recipient_phone,
+    message_text,
+    message_type = 'custom',
+    image_path = null,
+    image_base64 = null,
+  }) {
     const formattedPhone = this.formatPhone(recipient_phone);
     if (!formattedPhone) {
       throw new Error('Valid recipient phone number is required');
     }
-    if (!message_text || !message_text.trim()) {
-      throw new Error('Message text cannot be empty');
+    if ((!message_text || !message_text.trim()) && !image_base64 && !image_path) {
+      throw new Error('Message text or image is required');
     }
 
-    const rendered = this.parseSpintax(message_text);
+    let resolvedImagePath = image_path;
+
+    // If a base64 PNG image (e.g., full captured Digital Membership Pass card) is provided, save it
+    if (image_base64) {
+      try {
+        const cleanBase64 = String(image_base64).replace(/^data:image\/\w+;base64,/, '');
+        const fileName = `PASS-${member_id || 'MEMBER'}-${Date.now()}.png`;
+        const filePath = path.join(QR_DIR, fileName);
+        fs.writeFileSync(filePath, Buffer.from(cleanBase64, 'base64'));
+        resolvedImagePath = `/qrcodes/${fileName}`;
+      } catch (imgErr) {
+        console.warn('[WhatsApp] Failed to save base64 pass image:', imgErr.message);
+      }
+    }
+
+    // Fallback: for welcome/pass messages, attach the member's QR image if no pass image was provided
+    if (!resolvedImagePath && member_id && (message_type === 'welcome' || message_type === 'pass_card')) {
+      try {
+        const m = db.getMemberById(member_id) || db.getMemberByToken(member_id);
+        if (m && m.qr_path) {
+          resolvedImagePath = m.qr_path;
+        }
+      } catch (_) {}
+    }
+
+    const rendered = message_text ? this.parseSpintax(message_text) : '';
 
     const result = db.enqueueWaMessage({
       member_id,
       recipient_phone: formattedPhone,
       message_text: rendered,
       message_type,
+      image_path: resolvedImagePath,
     });
 
     const queueItem = {
@@ -200,6 +268,7 @@ class WhatsAppService {
       recipient_phone: formattedPhone,
       message_text: rendered,
       message_type,
+      image_path: resolvedImagePath,
       status: 'pending',
       created_at: new Date().toISOString(),
     };
@@ -312,6 +381,7 @@ class WhatsAppService {
         this.status = 'waiting';
         this.currentTask = {
           id: nextMsg.id,
+          memberId: nextMsg.member_id,
           phone: nextMsg.recipient_phone,
           type: nextMsg.message_type,
           delaySec,
@@ -321,6 +391,7 @@ class WhatsAppService {
         console.log(`[WhatsApp Anti-Ban] Waiting random human delay ${delaySec}s before sending to +${nextMsg.recipient_phone}...`);
         this.broadcast('whatsapp:waiting', {
           queueId: nextMsg.id,
+          memberId: nextMsg.member_id,
           recipient: nextMsg.recipient_phone,
           delaySeconds: delaySec,
           targetSendTime: this.currentTask.scheduledSendTime,
@@ -337,7 +408,12 @@ class WhatsAppService {
         let sendError = null;
 
         try {
-          await this.dispatchMessage(nextMsg.recipient_phone, nextMsg.message_text, settings);
+          await this.dispatchMessage(
+            nextMsg.recipient_phone,
+            nextMsg.message_text,
+            settings,
+            nextMsg.image_path
+          );
           sendSuccess = true;
           this.consecutiveSent++;
         } catch (err) {
@@ -347,6 +423,19 @@ class WhatsAppService {
         }
 
         // 6. Update SQLite Queue and Logs
+        const isTransientDisconnect =
+          !sendSuccess &&
+          sendError &&
+          (sendError.includes('reconnecting') || sendError.includes('NOT connected')) &&
+          (nextMsg.attempts || 0) < 4;
+
+        if (isTransientDisconnect) {
+          db.updateWaQueueStatus(nextMsg.id, 'pending', delaySec, sendError);
+          console.log(`[WhatsApp] Message #${nextMsg.id} kept in PENDING queue while socket reconnects (attempt ${(nextMsg.attempts || 0) + 1}/4)...`);
+          await new Promise((r) => setTimeout(r, 5000));
+          continue;
+        }
+
         const finalStatus = sendSuccess ? 'sent' : 'failed';
         db.updateWaQueueStatus(nextMsg.id, finalStatus, delaySec, sendError);
 
@@ -365,6 +454,7 @@ class WhatsAppService {
 
         this.broadcast('whatsapp:completed', {
           id: nextMsg.id,
+          memberId: nextMsg.member_id,
           recipient: nextMsg.recipient_phone,
           status: finalStatus,
           delayUsed: delaySec,
@@ -385,18 +475,25 @@ class WhatsAppService {
   }
 
   /**
-   * Dispatches the actual message over the wire
+   * Dispatches the actual message (or Image + Caption) over the wire
    */
-  async dispatchMessage(phone, text, settings) {
+  async dispatchMessage(phone, text, settings, imagePath = null) {
     const mode = settings.provider_mode || 'real_whatsapp';
+    const hasSession = realWhatsAppManager.hasStoredSession();
 
-    if (mode === 'real_whatsapp') {
-      const realStatus = realWhatsAppManager.getStatus();
-      if (realStatus.isConnected) {
-        return await realWhatsAppManager.sendRealMessage(phone, text);
+    if (mode === 'real_whatsapp' || hasSession || realWhatsAppManager.getStatus().isConnected) {
+      let realStatus = realWhatsAppManager.getStatus();
+      if (!realStatus.isConnected && hasSession) {
+        console.log(`[WhatsApp] Waiting for Real WhatsApp socket to finish reconnecting before sending to +${phone}...`);
+        await realWhatsAppManager.waitForConnection(25000);
+        realStatus = realWhatsAppManager.getStatus();
       }
 
-      if (settings.allow_simulation_fallback) {
+      if (realStatus.isConnected) {
+        return await realWhatsAppManager.sendRealMessage(phone, text, { imagePath });
+      }
+
+      if (!hasSession && settings.allow_simulation_fallback) {
         console.warn(`[WhatsApp] Real WhatsApp Web is not linked yet. Simulating delivery for +${phone} with random anti-ban delay (Scan QR in Web Console to link real phone).`);
         await new Promise((r) => setTimeout(r, 600));
         return {
@@ -408,7 +505,7 @@ class WhatsAppService {
       }
 
       throw new Error(
-        'Real WhatsApp is not connected. Please scan the QR code in the Gym Control Center to link your phone.'
+        'Real WhatsApp is temporarily reconnecting or not linked. Will retry once connected.'
       );
     }
 
@@ -487,14 +584,17 @@ class WhatsAppService {
   // ── Automated Triggers ──────────────────────────────────────────────────
 
   /**
-   * Trigger Welcome Message on Member Registration
+   * Trigger Welcome Message on Member Registration (with QR Pass Image attached)
    */
-  sendWelcomeMessage(member) {
+  sendWelcomeMessage(member, imageBase64 = null) {
     if (!member.phone) return null;
+    const settings = this.getSettings();
     const template =
+      (settings.template_welcome && settings.template_welcome.trim()) ||
       '{Salam|Hello|Hi|Welcome} {name}! 👋\n' +
-      'Thank you for joining *{gym_name}*! Your *{plan}* membership is active and valid until *{expiry_date}*.\n' +
-      'Your Member ID is *{id}*. See you at the gym! 💪';
+        'Thank you for joining *{gym_name}*! Your *{plan}* membership pass is active and valid until *{expiry_date}*.\n' +
+        'Your Member ID is *{id}*.\n' +
+        'Scan the attached Digital Membership Pass QR code at the front desk kiosk for entry! 💪';
 
     const rendered = this.renderMessage(template, {
       name: member.name,
@@ -508,6 +608,8 @@ class WhatsAppService {
       recipient_phone: member.phone,
       message_text: rendered,
       message_type: 'welcome',
+      image_path: member.qr_path || null,
+      image_base64: imageBase64,
     });
   }
 
@@ -517,19 +619,22 @@ class WhatsAppService {
   sendExpiryAlerts(daysThreshold = 4) {
     const dueMembers = db.getDueOrExpiredMembers();
     const queuedList = [];
+    const settings = this.getSettings();
 
     const templateDue =
+      (settings.template_due && settings.template_due.trim()) ||
       '{Salam|Hello|Dear} {name}! ⚠️\n' +
-      'This is a friendly reminder from *{gym_name}*.\n' +
-      'Your *{plan}* membership is due for renewal on *{expiry_date}*.\n' +
-      '{Please renew at the reception to keep your access uninterrupted|Kindly visit reception to settle dues|Please reach out to front desk to renew your pass}.\n' +
-      'Stay strong! 🏋️';
+        'This is a friendly reminder from *{gym_name}*.\n' +
+        'Your *{plan}* membership is due for renewal on *{expiry_date}*.\n' +
+        '{Please renew at the reception to keep your access uninterrupted|Kindly visit reception to settle dues|Please reach out to front desk to renew your pass}.\n' +
+        'Stay strong! 🏋️';
 
     const templateExpired =
+      (settings.template_expired && settings.template_expired.trim()) ||
       '{Salam|Hello|Dear} {name}!\n' +
-      'Your *{plan}* membership at *{gym_name}* has *expired* as of *{expiry_date}*.\n' +
-      '{Renew today to continue your fitness routine|Visit reception to reactivate your membership pass}.\n' +
-      'We hope to see you back on the gym floor soon! 💪';
+        'Your *{plan}* membership at *{gym_name}* has *expired* as of *{expiry_date}*.\n' +
+        '{Renew today to continue your fitness routine|Visit reception to reactivate your membership pass}.\n' +
+        'We hope to see you back on the gym floor soon! 💪';
 
     for (const member of dueMembers) {
       if (!member.phone) continue;
@@ -540,6 +645,7 @@ class WhatsAppService {
         name: member.name,
         plan: member.plan,
         expiry_date: member.expiry_date,
+        id: member.id,
       });
 
       try {
@@ -566,14 +672,16 @@ class WhatsAppService {
    */
   sendPaymentReceipt(member, paymentData = {}) {
     if (!member.phone) return null;
+    const settings = this.getSettings();
     const template =
+      (settings.template_receipt && settings.template_receipt.trim()) ||
       '{Salam|Hello} {name}! 🧾\n' +
-      'Payment confirmed at *{gym_name}*.\n' +
-      'Plan: *{plan}*\n' +
-      'Amount Paid: *Rs. {amount}*\n' +
-      'Method: *{method}*\n' +
-      'New Expiry Date: *{expiry_date}*\n' +
-      'Thank you for your business! 🔥';
+        'Payment confirmed at *{gym_name}*.\n' +
+        'Plan: *{plan}*\n' +
+        'Amount Paid: *Rs. {amount}*\n' +
+        'Method: *{method}*\n' +
+        'New Expiry Date: *{expiry_date}*\n' +
+        'Thank you for your business! 🔥';
 
     const text = this.renderMessage(template, {
       name: member.name,
@@ -581,6 +689,7 @@ class WhatsAppService {
       amount: paymentData.amount || '0',
       method: paymentData.method || 'Cash',
       expiry_date: member.expiry_date,
+      id: member.id,
     });
 
     return this.enqueue({
@@ -588,6 +697,7 @@ class WhatsAppService {
       recipient_phone: member.phone,
       message_text: text,
       message_type: 'payment_receipt',
+      image_base64: paymentData.image_base64 || null,
     });
   }
 
@@ -644,6 +754,7 @@ class WhatsAppService {
       currentTask: this.currentTask,
       pendingCount: db.getPendingWaCount(),
       sentTodayCount: db.getWaSentTodayCount(),
+      recentQueue: db.getWaQueueList(40),
       settings: this.getSettings(),
       realWhatsApp: realWhatsAppManager.getStatus(),
     };

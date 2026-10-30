@@ -25,13 +25,14 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS attendance (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    member_id   TEXT,
-    qr_token    TEXT NOT NULL,
-    member_name TEXT NOT NULL,
-    status      TEXT NOT NULL,
-    scanned_at  TEXT NOT NULL,
-    created_at  TEXT DEFAULT CURRENT_TIMESTAMP
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id     TEXT,
+    qr_token      TEXT NOT NULL,
+    member_name   TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    visitor_photo TEXT,
+    scanned_at    TEXT NOT NULL,
+    created_at    TEXT DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS whatsapp_queue (
@@ -40,6 +41,7 @@ db.exec(`
     recipient_phone TEXT NOT NULL,
     message_text    TEXT NOT NULL,
     message_type    TEXT DEFAULT 'custom', -- 'welcome', 'expiry_alert', 'payment_receipt', 'custom', 'test'
+    image_path      TEXT,
     status          TEXT DEFAULT 'pending', -- 'pending', 'processing', 'sent', 'failed', 'cancelled'
     delay_seconds   REAL DEFAULT 0,
     attempts        INTEGER DEFAULT 0,
@@ -82,10 +84,22 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_wa_logs_created ON whatsapp_logs(created_at DESC);
 `);
 
+try {
+  db.exec(`ALTER TABLE whatsapp_queue ADD COLUMN image_path TEXT;`);
+} catch (_) {
+  // Column already exists
+}
+
+try {
+  db.exec(`ALTER TABLE attendance ADD COLUMN visitor_photo TEXT;`);
+} catch (_) {
+  // Column already exists
+}
+
 // Prepared statements for maximum performance
 const stmts = {
   getAllMembers: db.prepare(`SELECT * FROM members ORDER BY name ASC`),
-  getMemberByToken: db.prepare(`SELECT * FROM members WHERE qr_token = ?`),
+  getMemberByToken: db.prepare(`SELECT * FROM members WHERE qr_token = ? OR id = ?`),
   getMemberById: db.prepare(`SELECT * FROM members WHERE id = ?`),
   countMembers: db.prepare(`SELECT COUNT(*) as count FROM members`),
   
@@ -104,14 +118,14 @@ const stmts = {
   deleteMember: db.prepare(`DELETE FROM members WHERE id = ?`),
 
   insertAttendance: db.prepare(`
-    INSERT INTO attendance (member_id, qr_token, member_name, status, scanned_at)
-    VALUES (@member_id, @qr_token, @member_name, @status, @scanned_at)
+    INSERT INTO attendance (member_id, qr_token, member_name, status, visitor_photo, scanned_at)
+    VALUES (@member_id, @qr_token, @member_name, @status, @visitor_photo, @scanned_at)
   `),
 
   getRecentAttendance: db.prepare(`
     SELECT a.*, m.phone, m.plan, m.expiry_date as member_expiry
     FROM attendance a
-    LEFT JOIN members m ON a.qr_token = m.qr_token
+    LEFT JOIN members m ON (a.qr_token = m.qr_token OR a.member_id = m.id)
     ORDER BY a.id DESC
     LIMIT ?
   `),
@@ -124,8 +138,8 @@ const stmts = {
 
   // WhatsApp Queue Statements
   enqueueWaMessage: db.prepare(`
-    INSERT INTO whatsapp_queue (member_id, recipient_phone, message_text, message_type, status, created_at)
-    VALUES (@member_id, @recipient_phone, @message_text, @message_type, 'pending', CURRENT_TIMESTAMP)
+    INSERT INTO whatsapp_queue (member_id, recipient_phone, message_text, message_type, image_path, status, created_at)
+    VALUES (@member_id, @recipient_phone, @message_text, @message_type, @image_path, 'pending', CURRENT_TIMESTAMP)
   `),
 
   getNextPendingWaMessage: db.prepare(`
@@ -217,7 +231,7 @@ const stmts = {
 const insertAttendanceBatchTx = db.transaction((scans) => {
   const results = [];
   for (const scan of scans) {
-    const member = stmts.getMemberByToken.get(scan.qr_token);
+    const member = stmts.getMemberByToken.get(scan.qr_token, scan.qr_token);
     let memberName = scan.member_name || 'Unknown Member';
     let memberId = null;
     let status = scan.status || 'paid';
@@ -237,6 +251,7 @@ const insertAttendanceBatchTx = db.transaction((scans) => {
       qr_token: scan.qr_token,
       member_name: memberName,
       status: status,
+      visitor_photo: scan.visitor_photo || null,
       scanned_at: scan.scanned_at || new Date().toISOString(),
     });
 
@@ -246,6 +261,7 @@ const insertAttendanceBatchTx = db.transaction((scans) => {
       member_name: memberName,
       qr_token: scan.qr_token,
       status: status,
+      visitor_photo: scan.visitor_photo || null,
       scanned_at: scan.scanned_at,
     });
   }
@@ -255,20 +271,20 @@ const insertAttendanceBatchTx = db.transaction((scans) => {
 module.exports = {
   db,
   getAllMembers: () => stmts.getAllMembers.all(),
-  getMemberByToken: (token) => stmts.getMemberByToken.get(token),
+  getMemberByToken: (token) => stmts.getMemberByToken.get(token, token),
   getMemberById: (id) => stmts.getMemberById.get(id),
   countMembers: () => stmts.countMembers.get().count,
   insertMember: (member) => stmts.insertMember.run(member),
   updateMember: (member) => stmts.updateMember.run(member),
   deleteMember: (id) => stmts.deleteMember.run(id),
-  insertAttendance: (record) => stmts.insertAttendance.run(record),
+  insertAttendance: (record) => stmts.insertAttendance.run({ visitor_photo: null, ...record }),
   insertAttendanceBatch: (scans) => insertAttendanceBatchTx(scans),
   getRecentAttendance: (limit = 50) => stmts.getRecentAttendance.all(limit),
   getTodayCheckinsCount: () => stmts.getTodayCheckinsCount.get().count,
   getDueOrExpiredMembers: () => stmts.getDueOrExpiredMembers.all(),
 
   // WhatsApp helpers
-  enqueueWaMessage: (msg) => stmts.enqueueWaMessage.run(msg),
+  enqueueWaMessage: (msg) => stmts.enqueueWaMessage.run({ image_path: null, ...msg }),
   getNextPendingWaMessage: () => stmts.getNextPendingWaMessage.get(),
   updateWaQueueStatus: (id, status, delaySec = 0, lastError = null) =>
     stmts.updateWaQueueStatus.run({

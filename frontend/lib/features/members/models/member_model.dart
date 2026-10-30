@@ -59,5 +59,10 @@ class MemberModel {
 
   bool get isExpired => expiryDate.isBefore(DateTime.now());
 
+  bool get isVisitor =>
+      plan.toLowerCase().contains('visitor') ||
+      (qrToken?.toUpperCase().startsWith('VIS-') ?? false) ||
+      id.toUpperCase().startsWith('V');
+
   int get daysUntilExpiry => expiryDate.difference(DateTime.now()).inDays;
 }

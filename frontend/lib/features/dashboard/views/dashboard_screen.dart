@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'widgets/kpi_card.dart';
 import 'widgets/live_feed.dart';
 import 'widgets/expiry_reminders.dart';
@@ -58,6 +61,117 @@ class _DashboardScreenState extends State<DashboardScreen> {
     showDialog(
       context: context,
       builder: (ctx) => const CollectPaymentDialog(),
+    );
+  }
+
+  void _openTabletKioskDialog(BuildContext context) async {
+    final netInfo = await ApiService.instance.getNetworkInfo();
+    final tabletUrl = netInfo?['tabletUrl'] ?? 'http://localhost:5000/tablet';
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: AppColors.border),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.tablet_mac_rounded, color: AppColors.primary, size: 22),
+            ),
+            const SizedBox(width: 12),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Tablet Kiosk Scanner', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+                SizedBox(height: 2),
+                Text('Scan QR or open in tablet browser', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+              ],
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: QrImageView(
+                  data: jsonEncode({
+                    'serverUrl': netInfo?['baseUrl'] ?? 'http://localhost:5000',
+                    'tabletUrl': tabletUrl,
+                    'wsUrl': netInfo?['wsUrl'] ?? 'ws://localhost:5000/ws',
+                    'primaryIp': netInfo?['primaryIp'] ?? '127.0.0.1',
+                    'gymName': 'Lá Fitness',
+                  }),
+                  version: QrVersions.auto,
+                  size: 200,
+                  backgroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceLight,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: SelectableText(
+                  tabletUrl,
+                  style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Open this link on any tablet (iPad / Android / Fire) or scan this QR with the tablet camera to auto-connect. All new members sync live and attendance works offline!',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.4),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          OutlinedButton.icon(
+            onPressed: () async {
+              try {
+                if (Platform.isWindows) {
+                  await Process.run('cmd', ['/c', 'start', tabletUrl]);
+                } else if (Platform.isMacOS) {
+                  await Process.run('open', [tabletUrl]);
+                } else if (Platform.isLinux) {
+                  await Process.run('xdg-open', [tabletUrl]);
+                }
+              } catch (_) {}
+            },
+            icon: const Icon(Icons.open_in_browser_rounded, size: 16),
+            label: const Text('Open in Browser'),
+            style: OutlinedButton.styleFrom(foregroundColor: AppColors.primary),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -158,6 +272,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       icon: const Icon(Icons.credit_card_rounded, color: AppColors.primary, size: 18),
                       label: const Text(
                         'Collect Payment',
+                        style: TextStyle(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: AppColors.surfaceLight,
+                        side: const BorderSide(color: AppColors.primary, width: 1.5),
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+
+                    OutlinedButton.icon(
+                      onPressed: () => _openTabletKioskDialog(context),
+                      icon: const Icon(Icons.tablet_mac_rounded, color: AppColors.primary, size: 18),
+                      label: const Text(
+                        'Tablet Kiosk',
                         style: TextStyle(
                           color: AppColors.primary,
                           fontWeight: FontWeight.bold,

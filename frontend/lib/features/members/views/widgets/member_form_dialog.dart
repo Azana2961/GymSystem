@@ -30,6 +30,7 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
   DateTime? _startDate;
   DateTime? _expiryDate;
   bool _includeJoiningFee = true;
+  bool _isVisitor = false;
   String _selectedPaymentMethod = 'Cash';
 
   final List<String> _genders = ['Male', 'Female', 'Other'];
@@ -49,6 +50,7 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
     _selectedPaymentMethod = _settings.paymentMethods.first;
 
     if (m != null) {
+      _isVisitor = m.isVisitor;
       _selectedPlan = _plans.contains(m.plan) ? m.plan : _plans.first;
       _selectedGender = m.gender;
       _startDate = m.startDate ?? DateTime.now();
@@ -71,14 +73,43 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
     super.dispose();
   }
 
-  double get _planFee => _settings.getPlanPrice(_selectedPlan);
+  double get _planFee => _isVisitor ? _settings.getPlanPrice('Visitor Pass') : _settings.getPlanPrice(_selectedPlan);
 
   double get _joiningFee =>
-      (_includeJoiningFee && _settings.enableJoiningFee) ? _settings.joiningFeeAmount : 0.0;
+      (!_isVisitor && _includeJoiningFee && _settings.enableJoiningFee) ? _settings.joiningFeeAmount : 0.0;
 
   double get _discount => double.tryParse(_discountController.text.trim()) ?? 0.0;
 
   double get _finalPrice => (_planFee + _joiningFee - _discount).clamp(0.0, double.infinity);
+
+  String _generatePassToken(bool visitor) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final ms = DateTime.now().microsecondsSinceEpoch;
+    final buf = StringBuffer(visitor ? 'VIS-' : 'GYM-');
+    int seed = ms;
+    for (int i = 0; i < 6; i++) {
+      buf.write(chars[(seed + i * 17) % chars.length]);
+      seed = (seed ~/ 7) + (i * 31);
+    }
+    return buf.toString();
+  }
+
+  void _onVisitorToggled(bool val) {
+    setState(() {
+      _isVisitor = val;
+      if (_isVisitor) {
+        _includeJoiningFee = false;
+        _startDate ??= DateTime.now();
+        _expiryDate = _startDate!.add(const Duration(days: 1));
+      } else {
+        _includeJoiningFee = _settings.enableJoiningFee;
+        if (_startDate != null) {
+          final days = _settings.getPlanDurationDays(_selectedPlan);
+          _expiryDate = _startDate!.add(Duration(days: days));
+        }
+      }
+    });
+  }
 
   void _onPlanChanged(String? newPlan) {
     if (newPlan == null) return;
@@ -101,10 +132,11 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
       }
 
       final formattedPrice = AppSettings.formatAmount(_finalPrice);
+      final generatedToken = widget.memberToEdit?.qrToken ?? _generatePassToken(_isVisitor);
       final member = MemberModel(
-        id: widget.memberToEdit?.id ?? 'M${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
+        id: widget.memberToEdit?.id ?? '${_isVisitor ? 'V' : 'M'}${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
         name: _nameController.text.trim(),
-        plan: _selectedPlan,
+        plan: _isVisitor ? 'Visitor Pass' : _selectedPlan,
         expiryDate: _expiryDate!,
         isPaymentPending: false, // Paid upon registration
         phone: _phoneController.text.trim().isNotEmpty ? _phoneController.text.trim() : null,
@@ -113,6 +145,7 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
         gender: _selectedGender,
         notes: 'Paid Rs. $formattedPrice via $_selectedPaymentMethod',
         isActive: true,
+        qrToken: generatedToken,
       );
 
       if (widget.memberToEdit != null) {
@@ -122,11 +155,19 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
           DummyData.members[dummyIdx] = member;
         }
       } else {
-        widget.provider.addMember(member);
+        widget.provider.addMember(member, sendWelcome: false);
         if (!DummyData.members.any((m) => m.id == member.id)) {
           DummyData.members.insert(0, member);
         }
       }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Member saved & synced to all Tablet Kiosks for offline scanning!'),
+          backgroundColor: AppColors.success,
+          duration: Duration(seconds: 3),
+        ),
+      );
 
       final nav = Navigator.of(context);
       nav.pop();
@@ -233,6 +274,91 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
                   ),
                   const Divider(height: 28, color: AppColors.border),
 
+                  // Visitor Pass Toggle Banner
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 18),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: _isVisitor
+                          ? const Color(0xFF00E5FF).withValues(alpha: 0.12)
+                          : AppColors.background,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _isVisitor
+                            ? const Color(0xFF00E5FF).withValues(alpha: 0.5)
+                            : AppColors.border,
+                        width: 1.2,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: _isVisitor
+                                ? const Color(0xFF00E5FF).withValues(alpha: 0.2)
+                                : AppColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            Icons.camera_enhance_rounded,
+                            color: _isVisitor ? const Color(0xFF00E5FF) : AppColors.textMuted,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Text(
+                                    'Visitor / Guest Pass',
+                                    style: TextStyle(
+                                      color: AppColors.textPrimary,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  if (_isVisitor) ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF00E5FF).withValues(alpha: 0.2),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: const Text(
+                                        'AUTO PHOTO ON SCAN',
+                                        style: TextStyle(
+                                          color: Color(0xFF00E5FF),
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              const Text(
+                                'Enable for visitors/walk-ins. Scanning a Visitor QR at the kiosk automatically takes their photo.',
+                                style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Switch(
+                          value: _isVisitor,
+                          activeTrackColor: const Color(0xFF00E5FF),
+                          activeThumbColor: Colors.black,
+                          onChanged: _onVisitorToggled,
+                        ),
+                      ],
+                    ),
+                  ),
+
                   // Full Name & Gender
                   Row(
                     children: [
@@ -255,9 +381,11 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Plan Selection
-                  _buildDropdownField('Membership Plan', _selectedPlan, _plans, _onPlanChanged),
-                  const SizedBox(height: 16),
+                  // Plan Selection (Hidden when Visitor Pass is toggled on)
+                  if (!_isVisitor) ...[
+                    _buildDropdownField('Membership Plan', _selectedPlan, _plans, _onPlanChanged),
+                    const SizedBox(height: 16),
+                  ],
 
                   // Start Date & Expiry Date
                   Row(
@@ -305,7 +433,7 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              '$_selectedPlan Fee',
+                              _isVisitor ? 'Visitor Pass Fee' : '$_selectedPlan Fee',
                               style: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
                             ),
                             Text(

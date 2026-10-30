@@ -60,4 +60,6 @@ yarn-error.log*
 
 # Generated QR code images
 backend/public/qrcodes/*.png
+backend/public/qrcodes/*.jpg
+backend/public/qrcodes/*.jpeg
 !backend/public/qrcodes/.gitkeep
