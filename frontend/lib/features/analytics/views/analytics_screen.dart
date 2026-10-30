@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:gym_system/core/constants/app_settings.dart';
+import 'package:gym_system/core/services/export_service.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/features/analytics/models/analytics_data.dart';
 import 'package:gym_system/features/dashboard/views/widgets/collect_payment_dialog.dart';
@@ -17,6 +18,8 @@ class AnalyticsScreen extends StatefulWidget {
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
   String _selectedMonth = 'October 2026';
   final MembersProvider _membersProvider = MembersProvider.instance;
+  bool _isExporting = false;
+  String _exportingType = '';
 
   MonthlyAnalyticsReport get _report => AnalyticsRepository.getReport(_selectedMonth);
 
@@ -108,29 +111,112 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     );
   }
 
-  void _exportReport(String type) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: const Color(0xFF1B1B20),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: const BorderSide(color: AppColors.primary, width: 1),
-        ),
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 20),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                '$type for $_selectedMonth generated successfully.',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-              ),
+  Future<void> _exportReport(
+    String type, {
+    required MonthlyAnalyticsReport report,
+    required double effectiveRevenue,
+    required List<DefaulterRecord> udhaarList,
+    required double totalUdhaar,
+  }) async {
+    if (_isExporting) return;
+    setState(() {
+      _isExporting = true;
+      _exportingType = type;
+    });
+
+    try {
+      final ExportResult result;
+      if (type == 'csv') {
+        result = await ExportService.instance.exportAnalyticsCsv(
+          report: report,
+          effectiveRevenue: effectiveRevenue,
+          udhaarList: udhaarList,
+          totalUdhaar: totalUdhaar,
+        );
+      } else {
+        result = await ExportService.instance.exportAnalyticsPdf(
+          report: report,
+          effectiveRevenue: effectiveRevenue,
+          udhaarList: udhaarList,
+          totalUdhaar: totalUdhaar,
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _isExporting = false;
+        _exportingType = '';
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF1B1B20),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 5),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: BorderSide(
+              color: result.success ? AppColors.success : AppColors.error,
+              width: 1.2,
             ),
-          ],
+          ),
+          content: Row(
+            children: [
+              Icon(
+                result.success ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+                color: result.success ? AppColors.success : AppColors.error,
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      result.success
+                          ? '⚡ ${type.toUpperCase()} file saved: ${result.fileName}'
+                          : result.message,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    if (result.success) ...[
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Saved to Downloads & opened in default app',
+                        style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (result.success) ...[
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () => ExportService.instance.revealInFolder(result.filePath),
+                  child: const Text(
+                    'Show in Folder',
+                    style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isExporting = false;
+          _exportingType = '';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.error,
+            content: Text('Export failed: $e'),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -246,13 +332,27 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     ),
                     const SizedBox(width: 12),
 
-                    // Excel Export
+                    // Excel / CSV Export
                     OutlinedButton.icon(
-                      onPressed: () => _exportReport('Excel Data Export'),
-                      icon: const Icon(Icons.table_chart_outlined, color: AppColors.primary, size: 16),
-                      label: const Text(
-                        'Export Excel',
-                        style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 13),
+                      onPressed: _isExporting
+                          ? null
+                          : () => _exportReport(
+                                'csv',
+                                report: report,
+                                effectiveRevenue: effectiveRevenue,
+                                udhaarList: udhaarList,
+                                totalUdhaar: totalUdhaar,
+                              ),
+                      icon: _isExporting && _exportingType == 'csv'
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                            )
+                          : const Icon(Icons.table_chart_outlined, color: AppColors.primary, size: 16),
+                      label: Text(
+                        _isExporting && _exportingType == 'csv' ? 'Exporting CSV...' : 'Export Excel / CSV',
+                        style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 13),
                       ),
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: AppColors.primary),
@@ -265,11 +365,25 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
                     // PDF Export
                     ElevatedButton.icon(
-                      onPressed: () => _exportReport('PDF Summary Report'),
-                      icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.black, size: 16),
-                      label: const Text(
-                        'Export PDF',
-                        style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13),
+                      onPressed: _isExporting
+                          ? null
+                          : () => _exportReport(
+                                'pdf',
+                                report: report,
+                                effectiveRevenue: effectiveRevenue,
+                                udhaarList: udhaarList,
+                                totalUdhaar: totalUdhaar,
+                              ),
+                      icon: _isExporting && _exportingType == 'pdf'
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                            )
+                          : const Icon(Icons.picture_as_pdf_outlined, color: Colors.black, size: 16),
+                      label: Text(
+                        _isExporting && _exportingType == 'pdf' ? 'Generating PDF...' : 'Export PDF',
+                        style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
