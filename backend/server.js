@@ -422,6 +422,21 @@ app.post('/api/attendance/batch', (req, res) => {
       return res.status(400).json({ success: false, message: 'scans array is required' });
     }
 
+    // Save any offline visitor camera snapshots to files on disk
+    for (const scan of scans) {
+      if (scan.visitor_photo && (scan.visitor_photo.length > 200 || scan.visitor_photo.startsWith('data:image'))) {
+        try {
+          const cleanB64 = String(scan.visitor_photo).replace(/^data:image\/\w+;base64,/, '');
+          const fileName = `VISITOR-${scan.member_id || scan.qr_token || 'OFFLINE'}-${Date.now()}-${Math.floor(Math.random() * 1000)}.jpg`;
+          const filePath = path.join(QR_DIR, fileName);
+          fs.writeFileSync(filePath, Buffer.from(cleanB64, 'base64'));
+          scan.visitor_photo = `/qrcodes/${fileName}`;
+        } catch (photoErr) {
+          console.warn('[BATCH SYNC] Could not save offline visitor photo snapshot:', photoErr.message);
+        }
+      }
+    }
+
     const saved = db.insertAttendanceBatch(scans);
     console.log(`[BATCH SYNC] Successfully processed ${saved.length} offline check-ins from tablet`);
 
