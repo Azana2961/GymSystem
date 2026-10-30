@@ -282,7 +282,8 @@ app.get('/api/members/sync', (req, res) => {
         m.status === 'visitor' ||
         String(m.qr_token || '').toUpperCase().startsWith('VIS-') ||
         String(m.plan || '').toLowerCase().includes('visitor');
-      let status = isVis ? 'visitor' : m.status;
+      const dueAmt = Number(m.due_amount || 0);
+      let status = isVis ? 'visitor' : (dueAmt > 0 ? 'due' : m.status);
       if (!isVis && new Date(m.expiry_date) < new Date()) {
         status = 'expired';
       }
@@ -296,6 +297,7 @@ app.get('/api/members/sync', (req, res) => {
         plan: m.plan,
         email: m.email,
         gender: m.gender,
+        due_amount: dueAmt,
       };
     });
 
@@ -336,7 +338,8 @@ app.post('/api/attendance/scan', (req, res) => {
       String(qr_token).toUpperCase().startsWith('VIS-') ||
       String(member.plan || '').toLowerCase().includes('visitor');
 
-    let status = isVisitorMember ? 'visitor' : member.status;
+    const dueAmt = Number(member.due_amount || 0);
+    let status = isVisitorMember ? 'visitor' : (dueAmt > 0 ? 'due' : member.status);
     const now = new Date();
     const expiry = new Date(member.expiry_date);
     if (!isVisitorMember) {
@@ -350,17 +353,18 @@ app.post('/api/attendance/scan', (req, res) => {
       }
     }
 
-    // Save visitor camera snapshot if provided
+    // Save camera snapshot if provided (Visitor, Due, or Expired check-in)
     let savedPhotoUrl = visitor_photo || null;
     if (visitor_photo_base64) {
       try {
         const cleanB64 = String(visitor_photo_base64).replace(/^data:image\/\w+;base64,/, '');
-        const fileName = `VISITOR-${member.id}-${Date.now()}.jpg`;
+        const prefix = status.toUpperCase();
+        const fileName = `${prefix}-${member.id}-${Date.now()}.jpg`;
         const filePath = path.join(QR_DIR, fileName);
         fs.writeFileSync(filePath, Buffer.from(cleanB64, 'base64'));
         savedPhotoUrl = `/qrcodes/${fileName}`;
       } catch (photoErr) {
-        console.warn('[ATTENDANCE] Failed to save visitor photo:', photoErr.message);
+        console.warn('[ATTENDANCE] Failed to save check-in photo:', photoErr.message);
       }
     }
 
@@ -382,6 +386,7 @@ app.post('/api/attendance/scan', (req, res) => {
       status: status,
       plan: member.plan,
       phone: member.phone,
+      due_amount: dueAmt,
       visitor_photo: savedPhotoUrl,
       scanned_at: timestamp,
       device_id: device_id || 'tablet',
@@ -397,6 +402,7 @@ app.post('/api/attendance/scan', (req, res) => {
       message: `Welcome, ${member.name}!`,
       status: status,
       is_visitor: isVisitorMember,
+      due_amount: dueAmt,
       visitor_photo: savedPhotoUrl,
       member: {
         id: member.id,
@@ -404,6 +410,7 @@ app.post('/api/attendance/scan', (req, res) => {
         status: status,
         expiry_date: member.expiry_date,
         plan: member.plan,
+        due_amount: dueAmt,
       },
       attendance: attendanceRecord,
     });
@@ -457,7 +464,22 @@ app.post('/api/attendance/batch', (req, res) => {
 // ── 3. Member Registration: POST /api/members/register ────────────────────
 app.post('/api/members/register', async (req, res) => {
   try {
-    const { id, qr_token, name, phone, plan, expiry_date, status, email, gender, notes, send_welcome, image_base64 } = req.body;
+    const {
+      id,
+      qr_token,
+      name,
+      phone,
+      plan,
+      expiry_date,
+      status,
+      email,
+      gender,
+      notes,
+      due_amount,
+      paid_amount,
+      send_welcome,
+      image_base64,
+    } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, message: 'Member name is required' });
@@ -466,6 +488,12 @@ app.post('/api/members/register', async (req, res) => {
     const isVisitorReg =
       status === 'visitor' ||
       String(plan || '').toLowerCase().includes('visitor');
+    const dueAmt = isVisitorReg ? 0 : (Number(due_amount) || 0);
+    const paidAmt = isVisitorReg ? 0 : (Number(paid_amount) || 0);
+    const resolvedStatus = isVisitorReg
+      ? 'visitor'
+      : (dueAmt > 0 ? 'due' : (status || 'paid'));
+
     const memberId = (id && String(id).trim()) || ((isVisitorReg ? 'V' : 'M') + Date.now().toString().slice(-6));
     const qrToken = (qr_token && String(qr_token).trim()) || generateQrToken(isVisitorReg ? 'VIS' : 'GYM');
 
@@ -479,17 +507,19 @@ app.post('/api/members/register', async (req, res) => {
       email: (email || '').trim(),
       plan: plan || 'Monthly',
       expiry_date: expiry_date || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
-      status: status || 'paid',
+      status: resolvedStatus,
       qr_token: qrToken,
       qr_path: url,
       gender: gender || 'Other',
       notes: notes || '',
+      due_amount: dueAmt,
+      paid_amount: paidAmt,
       created_at: new Date().toISOString(),
     };
 
     db.insertMember(newMember);
 
-    console.log(`[REGISTRATION] New member: ${newMember.name} (QR: ${qrToken})`);
+    console.log(`[REGISTRATION] New member: ${newMember.name} (QR: ${qrToken}, Status: ${resolvedStatus}, Udhaar: ${dueAmt})`);
 
     // Broadcast new member to any connected laptop or tablet
     broadcast('member:new', newMember);
@@ -543,6 +573,22 @@ app.put('/api/members/:id', (req, res) => {
     const existing = db.getMemberById(req.params.id);
     if (!existing) return res.status(404).json({ success: false, message: 'Member not found' });
 
+    const dueAmt = req.body.due_amount !== undefined
+      ? Number(req.body.due_amount) || 0
+      : Number(existing.due_amount || 0);
+    const paidAmt = req.body.paid_amount !== undefined
+      ? (Number(existing.paid_amount || 0) + (Number(req.body.paid_amount) || 0))
+      : Number(existing.paid_amount || 0);
+
+    let resolvedStatus = req.body.status ?? existing.status;
+    if (resolvedStatus !== 'visitor') {
+      if (dueAmt > 0) {
+        resolvedStatus = 'due';
+      } else if (req.body.due_amount !== undefined && dueAmt === 0 && resolvedStatus === 'due') {
+        resolvedStatus = 'paid';
+      }
+    }
+
     const updated = {
       id: req.params.id,
       name: req.body.name ?? existing.name,
@@ -550,9 +596,12 @@ app.put('/api/members/:id', (req, res) => {
       email: req.body.email ?? existing.email,
       plan: req.body.plan ?? existing.plan,
       expiry_date: req.body.expiry_date ?? existing.expiry_date,
-      status: req.body.status ?? existing.status,
+      status: resolvedStatus,
       gender: req.body.gender ?? existing.gender,
       notes: req.body.notes ?? existing.notes,
+      due_amount: dueAmt,
+      paid_amount: paidAmt,
+      qr_token: existing.qr_token,
     };
 
     db.updateMember(updated);
@@ -597,15 +646,33 @@ app.get('/api/attendance/feed', (req, res) => {
 app.get('/api/stats', (req, res) => {
   const members = db.getAllMembers();
   const todayCheckins = db.getTodayCheckinsCount();
+  const yesterdayCheckins = db.getYesterdayCheckinsCount();
 
   let active = 0;
   let due = 0;
   let expired = 0;
+  let visitors = 0;
+  let totalDueAmount = 0;
 
+  const now = new Date();
   for (const m of members) {
-    if (m.status === 'paid') active++;
-    else if (m.status === 'due') due++;
-    else expired++;
+    const isVis =
+      m.status === 'visitor' ||
+      String(m.qr_token || '').toUpperCase().startsWith('VIS-') ||
+      String(m.plan || '').toLowerCase().includes('visitor');
+    const dueAmt = Number(m.due_amount || 0);
+    totalDueAmount += dueAmt;
+
+    if (isVis) {
+      visitors++;
+      active++;
+    } else if (new Date(m.expiry_date) < now || m.status === 'expired') {
+      expired++;
+    } else if (m.status === 'due' || dueAmt > 0) {
+      due++;
+    } else {
+      active++;
+    }
   }
 
   res.json({
@@ -613,9 +680,12 @@ app.get('/api/stats', (req, res) => {
     stats: {
       totalMembers: members.length,
       todayCheckins,
+      yesterdayCheckins,
       activeMembers: active,
       dueMembers: due,
       expiredMembers: expired,
+      visitorMembers: visitors,
+      totalDueAmount,
       whatsappPending: db.getPendingWaCount(),
       whatsappSentToday: db.getWaSentTodayCount(),
     },

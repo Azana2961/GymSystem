@@ -58,6 +58,7 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
     super.initState();
     _initData();
     _membersProvider.addListener(_onMembersUpdated);
+    AppSettings.instance.addListener(_onSettingsUpdated);
     // Check if backend already has active queue items on load
     _syncLiveQueueFromServer();
   }
@@ -66,7 +67,12 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
   void dispose() {
     _livePollTimer?.cancel();
     _membersProvider.removeListener(_onMembersUpdated);
+    AppSettings.instance.removeListener(_onSettingsUpdated);
     super.dispose();
+  }
+
+  void _onSettingsUpdated() {
+    if (mounted) setState(() {});
   }
 
   String _normalizePhone(String raw) {
@@ -167,6 +173,15 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
   }
 
   Future<void> _sendAllReminders() async {
+    if (!AppSettings.instance.sendExpiryAlert) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Expiry Reminders are turned OFF in Settings. Toggle them ON in Settings to send alerts.'),
+          backgroundColor: AppColors.warning,
+        ),
+      );
+      return;
+    }
     final idleItems = _reminders.where((r) => r.queueState == 'idle').toList();
     if (idleItems.isEmpty) {
       if (_hasActiveQueue) {
@@ -240,6 +255,15 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
   }
 
   Future<void> _sendSingle(ReminderItem item) async {
+    if (!AppSettings.instance.sendExpiryAlert) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Expiry Reminders are turned OFF in Settings. Toggle them ON in Settings to send alerts.'),
+          backgroundColor: AppColors.warning,
+        ),
+      );
+      return;
+    }
     if (item.queueState != 'idle') return;
 
     final now = DateTime.now();
@@ -425,13 +449,19 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                _hasActiveQueue
-                                    ? 'Live Anti-Ban Queue Active (${queuedItems.length} remaining)'
-                                    : 'Automated Membership Retention',
+                                !AppSettings.instance.sendExpiryAlert
+                                    ? 'Paused (Turned OFF in Settings)'
+                                    : (_hasActiveQueue
+                                        ? 'Live Anti-Ban Queue Active (${queuedItems.length} remaining)'
+                                        : 'Automated Membership Retention'),
                                 style: TextStyle(
-                                  color: _hasActiveQueue ? AppColors.primary : AppColors.textMuted,
+                                  color: !AppSettings.instance.sendExpiryAlert
+                                      ? AppColors.warning
+                                      : (_hasActiveQueue ? AppColors.primary : AppColors.textMuted),
                                   fontSize: 11,
-                                  fontWeight: _hasActiveQueue ? FontWeight.w600 : FontWeight.normal,
+                                  fontWeight: (_hasActiveQueue || !AppSettings.instance.sendExpiryAlert)
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -445,20 +475,28 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
                   const SizedBox(width: 10),
                   // Send Reminders Button (Yellow Theme)
                   ElevatedButton.icon(
-                    onPressed: _hasActiveQueue ? null : _sendAllReminders,
+                    onPressed: (_hasActiveQueue || !AppSettings.instance.sendExpiryAlert) ? null : _sendAllReminders,
                     icon: _hasActiveQueue
                         ? const SizedBox(
                             width: 14,
                             height: 14,
                             child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
                           )
-                        : const Icon(Icons.send_rounded, size: 14, color: Colors.black),
+                        : Icon(
+                            !AppSettings.instance.sendExpiryAlert ? Icons.notifications_off_rounded : Icons.send_rounded,
+                            size: 14,
+                            color: !AppSettings.instance.sendExpiryAlert ? AppColors.textMuted : Colors.black,
+                          ),
                     label: Text(
-                      _hasActiveQueue
-                          ? 'In Queue (${queuedItems.length})'
-                          : 'Send Reminders',
+                      !AppSettings.instance.sendExpiryAlert
+                          ? 'Reminders Off'
+                          : (_hasActiveQueue
+                              ? 'In Queue (${queuedItems.length})'
+                              : 'Send Reminders'),
                       style: TextStyle(
-                        color: _hasActiveQueue ? AppColors.primary : Colors.black,
+                        color: !AppSettings.instance.sendExpiryAlert
+                            ? AppColors.textMuted
+                            : (_hasActiveQueue ? AppColors.primary : Colors.black),
                         fontWeight: FontWeight.bold,
                         fontSize: 12,
                       ),

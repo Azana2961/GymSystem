@@ -152,8 +152,12 @@ class MembersProvider extends ChangeNotifier {
   }).length;
 
   int get pendingPaymentCount => _members.where((m) {
-    return m.isPaymentPending || m.isExpired;
+    return m.isPaymentPending || m.dueAmount > 0 || m.isExpired;
   }).length;
+
+  int get expiredMembersCount => _members.where((m) => m.isExpired && !m.isVisitor).length;
+
+  double get totalDueAmount => _members.fold<double>(0.0, (sum, m) => sum + m.dueAmount);
 
   // Setters & Actions
   void setSearchQuery(String query) {

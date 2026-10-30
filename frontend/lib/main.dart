@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:gym_system/core/constants/app_settings.dart';
 import 'package:gym_system/core/theme/app_theme.dart';
 import 'package:gym_system/core/widgets/main_layout.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  AppSettings.instance.loadFromServer();
   runApp(const GymSystemApp());
 }
 

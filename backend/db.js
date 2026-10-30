@@ -96,6 +96,18 @@ try {
   // Column already exists
 }
 
+try {
+  db.exec(`ALTER TABLE members ADD COLUMN due_amount REAL DEFAULT 0;`);
+} catch (_) {
+  // Column already exists
+}
+
+try {
+  db.exec(`ALTER TABLE members ADD COLUMN paid_amount REAL DEFAULT 0;`);
+} catch (_) {
+  // Column already exists
+}
+
 // Prepared statements for maximum performance
 const stmts = {
   getAllMembers: db.prepare(`SELECT * FROM members ORDER BY name ASC`),
@@ -104,14 +116,15 @@ const stmts = {
   countMembers: db.prepare(`SELECT COUNT(*) as count FROM members`),
   
   insertMember: db.prepare(`
-    INSERT INTO members (id, name, phone, email, plan, expiry_date, status, qr_token, qr_path, gender, notes, created_at)
-    VALUES (@id, @name, @phone, @email, @plan, @expiry_date, @status, @qr_token, @qr_path, @gender, @notes, @created_at)
+    INSERT INTO members (id, name, phone, email, plan, expiry_date, status, qr_token, qr_path, gender, notes, due_amount, paid_amount, created_at)
+    VALUES (@id, @name, @phone, @email, @plan, @expiry_date, @status, @qr_token, @qr_path, @gender, @notes, @due_amount, @paid_amount, @created_at)
   `),
 
   updateMember: db.prepare(`
     UPDATE members 
     SET name = @name, phone = @phone, email = @email, plan = @plan, 
-        expiry_date = @expiry_date, status = @status, gender = @gender, notes = @notes
+        expiry_date = @expiry_date, status = @status, gender = @gender, notes = @notes,
+        due_amount = @due_amount, paid_amount = @paid_amount
     WHERE id = @id
   `),
 
@@ -123,7 +136,7 @@ const stmts = {
   `),
 
   getRecentAttendance: db.prepare(`
-    SELECT a.*, m.phone, m.plan, m.expiry_date as member_expiry
+    SELECT a.*, m.phone, m.plan, m.expiry_date as member_expiry, m.due_amount
     FROM attendance a
     LEFT JOIN members m ON (a.qr_token = m.qr_token OR a.member_id = m.id)
     ORDER BY a.id DESC
@@ -134,6 +147,12 @@ const stmts = {
     SELECT COUNT(*) as count 
     FROM attendance 
     WHERE date(scanned_at) = date('now', 'localtime')
+  `),
+
+  getYesterdayCheckinsCount: db.prepare(`
+    SELECT COUNT(*) as count 
+    FROM attendance 
+    WHERE date(scanned_at) = date('now', '-1 day', 'localtime')
   `),
 
   // WhatsApp Queue Statements
@@ -274,13 +293,14 @@ module.exports = {
   getMemberByToken: (token) => stmts.getMemberByToken.get(token, token),
   getMemberById: (id) => stmts.getMemberById.get(id),
   countMembers: () => stmts.countMembers.get().count,
-  insertMember: (member) => stmts.insertMember.run(member),
-  updateMember: (member) => stmts.updateMember.run(member),
+  insertMember: (member) => stmts.insertMember.run({ due_amount: 0, paid_amount: 0, ...member }),
+  updateMember: (member) => stmts.updateMember.run({ due_amount: 0, paid_amount: 0, ...member }),
   deleteMember: (id) => stmts.deleteMember.run(id),
   insertAttendance: (record) => stmts.insertAttendance.run({ visitor_photo: null, ...record }),
   insertAttendanceBatch: (scans) => insertAttendanceBatchTx(scans),
   getRecentAttendance: (limit = 50) => stmts.getRecentAttendance.all(limit),
   getTodayCheckinsCount: () => stmts.getTodayCheckinsCount.get().count,
+  getYesterdayCheckinsCount: () => stmts.getYesterdayCheckinsCount.get().count,
   getDueOrExpiredMembers: () => stmts.getDueOrExpiredMembers.all(),
 
   // WhatsApp helpers

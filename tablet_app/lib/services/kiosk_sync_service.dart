@@ -15,6 +15,7 @@ class ScanResultInfo {
   final String plan;
   final String expiryDate;
   final String qrToken;
+  final double dueAmount;
   final Uint8List? visitorPhotoBytes;
 
   const ScanResultInfo({
@@ -25,6 +26,7 @@ class ScanResultInfo {
     required this.plan,
     required this.expiryDate,
     required this.qrToken,
+    this.dueAmount = 0.0,
     this.visitorPhotoBytes,
   });
 
@@ -32,6 +34,7 @@ class ScanResultInfo {
   bool get isVisitor => status == 'visitor';
   bool get isDue => status == 'due';
   bool get isExpired => status == 'expired';
+  bool get requiresPhoto => isVisitor || isDue || isExpired;
 }
 
 class KioskSyncService extends ChangeNotifier {
@@ -96,7 +99,7 @@ class KioskSyncService extends ChangeNotifier {
 
       // Sync latest members
       await syncMembersRoster();
-      // Flush any queued offline scans (including visitor photos)
+      // Flush any queued offline scans (including verification photos)
       await flushOfflineScans();
       // Open WebSocket Channel for instant live member updates
       _openWebSocket();
@@ -167,7 +170,6 @@ class KioskSyncService extends ChangeNotifier {
 
       switch (type) {
         case 'member:new':
-          // Once PC app adds a member, it immediately caches on the tablet/mobile!
           if (data is Map<String, dynamic>) {
             final newMember = MemberItem.fromJson(data);
             _storage.saveMember(newMember);
@@ -231,7 +233,7 @@ class KioskSyncService extends ChangeNotifier {
     return 0;
   }
 
-  /// Upload queued offline check-ins (with visitor photos) to PC
+  /// Upload queued offline check-ins (with verification photos) to PC
   Future<int> flushOfflineScans() async {
     final pending = _storage.pendingScans;
     if (pending.isEmpty) return 0;
@@ -258,16 +260,29 @@ class KioskSyncService extends ChangeNotifier {
     return 0;
   }
 
-  /// Check if a QR token belongs to a Visitor Pass
-  bool isVisitorToken(String qrToken) {
+  /// Look up a cached member by QR token or ID
+  MemberItem? findMember(String qrToken) {
+    return _storage.findMember(qrToken.trim());
+  }
+
+  /// Preview member status ('visitor', 'expired', 'due', 'paid') before photo capture
+  String previewMemberStatus(String qrToken) {
     final clean = qrToken.trim();
-    if (clean.toUpperCase().startsWith('VIS-')) return true;
+    if (clean.toUpperCase().startsWith('VIS-')) return 'visitor';
     final member = _storage.findMember(clean);
     if (member != null) {
-      return member.status == 'visitor' ||
-          (member.plan?.toLowerCase().contains('visitor') ?? false);
+      if (member.isVisitor) return 'visitor';
+      if (member.isExpired) return 'expired';
+      if (member.isDue) return 'due';
+      return 'paid';
     }
-    return false;
+    return 'paid';
+  }
+
+  /// Check if a QR token requires a "Stay Still" verification photo ('visitor', 'due', or 'expired')
+  bool requiresVerificationPhoto(String qrToken) {
+    final status = previewMemberStatus(qrToken);
+    return status == 'visitor' || status == 'due' || status == 'expired';
   }
 
   /// Process an attendance scan (Online with immediate PC sync, or Offline with local verification & queuing)
@@ -296,17 +311,19 @@ class KioskSyncService extends ChangeNotifier {
         if (res.statusCode == 200) {
           final json = jsonDecode(res.body) as Map<String, dynamic>;
           final memberData = json['member'] as Map<String, dynamic>?;
+          final dueAmt = (memberData?['due_amount'] as num?)?.toDouble() ?? 0.0;
+          final resolvedStatus = json['status']?.toString() ?? (dueAmt > 0 ? 'due' : 'paid');
           if (memberData != null) {
             await _storage.saveMember(MemberItem(
               id: memberData['id']?.toString() ?? cleanToken,
               qrToken: cleanToken,
               name: memberData['name']?.toString() ?? 'Member',
-              status: json['status']?.toString() ?? 'paid',
+              status: resolvedStatus,
               expiryDate: memberData['expiry_date']?.toString() ?? '',
               plan: memberData['plan']?.toString(),
+              dueAmount: dueAmt,
             ));
           }
-          // Flush any previously queued offline scans in background
           if (_storage.pendingScansCount > 0) {
             unawaited(flushOfflineScans());
           }
@@ -314,15 +331,15 @@ class KioskSyncService extends ChangeNotifier {
           return ScanResultInfo(
             isOnline: true,
             isRecognized: true,
-            status: json['status']?.toString() ?? 'paid',
+            status: resolvedStatus,
             memberName: memberData?['name']?.toString() ?? 'Member',
             plan: memberData?['plan']?.toString() ?? 'Active Pass',
             expiryDate: memberData?['expiry_date']?.toString() ?? '',
             qrToken: cleanToken,
+            dueAmount: dueAmt,
             visitorPhotoBytes: visitorPhotoBytes,
           );
         } else if (res.statusCode == 404) {
-          // Server is online and explicitly reported token not found
           final localFallback = _storage.findMember(cleanToken);
           if (localFallback == null) {
             return ScanResultInfo(
@@ -348,15 +365,12 @@ class KioskSyncService extends ChangeNotifier {
     // 2. Offline Fallback: Verify against local cached member roster & queue scan + photo
     final member = _storage.findMember(cleanToken);
     if (member != null) {
-      final isVis = member.status == 'visitor' ||
-          cleanToken.toUpperCase().startsWith('VIS-') ||
-          (member.plan?.toLowerCase().contains('visitor') ?? false);
-      String status = isVis ? 'visitor' : member.status;
+      final isVis = member.isVisitor;
+      String status = isVis ? 'visitor' : (member.isDue ? 'due' : member.status);
       if (!isVis && member.isExpired) {
         status = 'expired';
       }
 
-      // Record locally to offline queue (with visitor photo if captured)
       await _storage.addPendingScan(AttendanceRecord(
         qrToken: cleanToken,
         memberName: member.name,
@@ -376,6 +390,7 @@ class KioskSyncService extends ChangeNotifier {
         plan: member.plan ?? (isVis ? 'Visitor Pass' : 'Standard Plan'),
         expiryDate: member.expiryDate,
         qrToken: cleanToken,
+        dueAmount: member.dueAmount,
         visitorPhotoBytes: visitorPhotoBytes,
       );
     } else {
@@ -407,7 +422,7 @@ class KioskSyncService extends ChangeNotifier {
                 'device_id': _storage.deviceId,
                 'device_name': _storage.deviceName,
                 'battery_level': 100,
-                'app_version': '2.1.0-adaptive',
+                'app_version': '2.2.0-adaptive',
               }),
             )
             .timeout(const Duration(seconds: 3));

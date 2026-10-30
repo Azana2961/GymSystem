@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:gym_system/core/constants/app_settings.dart';
-import 'package:gym_system/core/constants/dummy_data.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/features/analytics/models/analytics_data.dart';
 import 'package:gym_system/features/dashboard/views/widgets/collect_payment_dialog.dart';
 import 'package:gym_system/features/members/models/member_model.dart';
+import 'package:gym_system/features/members/providers/members_provider.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -16,13 +16,79 @@ class AnalyticsScreen extends StatefulWidget {
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
   String _selectedMonth = 'October 2026';
+  final MembersProvider _membersProvider = MembersProvider.instance;
 
   MonthlyAnalyticsReport get _report => AnalyticsRepository.getReport(_selectedMonth);
+
+  @override
+  void initState() {
+    super.initState();
+    _membersProvider.addListener(_onDataChanged);
+    AppSettings.instance.addListener(_onDataChanged);
+  }
+
+  void _onDataChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _membersProvider.removeListener(_onDataChanged);
+    AppSettings.instance.removeListener(_onDataChanged);
+    super.dispose();
+  }
+
+  /// Combines live members who have Udhaar (`dueAmount > 0` or `isPaymentPending`) with report defaulters
+  List<DefaulterRecord> _getCombinedUdhaarList(MonthlyAnalyticsReport report) {
+    final Map<String, DefaulterRecord> byId = {};
+
+    // 1. Live members from SQLite / MembersProvider with Udhaar or pending payment
+    for (final m in _membersProvider.allMembers) {
+      if (m.isVisitor) continue;
+      final hasDue = m.dueAmount > 0 || m.isPaymentPending;
+      if (hasDue) {
+        final amount = m.dueAmount > 0
+            ? m.dueAmount
+            : AppSettings.instance.getPlanPrice(m.plan);
+        final overdueDays = m.expiryDate.isBefore(DateTime.now())
+            ? DateTime.now().difference(m.expiryDate).inDays.clamp(1, 365)
+            : 0;
+        byId[m.id] = DefaulterRecord(
+          id: m.id,
+          name: m.name,
+          phone: m.phone ?? '+92 300 0000000',
+          plan: m.plan,
+          amountDue: amount,
+          daysOverdue: overdueDays,
+        );
+      }
+    }
+
+    // 2. Include historical report defaulters if not already settled in live members
+    for (final d in report.defaulters) {
+      final liveMatch = _membersProvider.allMembers.where((m) => m.id == d.id).firstOrNull;
+      if (liveMatch != null) {
+        // If live member exists and has 0 due and is not pending, they already paid their Udhaar!
+        if (liveMatch.dueAmount <= 0 && !liveMatch.isPaymentPending) {
+          continue;
+        }
+      }
+      byId.putIfAbsent(d.id, () => d);
+    }
+
+    final list = byId.values.toList();
+    list.sort((a, b) => b.amountDue.compareTo(a.amountDue));
+    return list;
+  }
+
+  double _getLiveTotalUdhaar(List<DefaulterRecord> udhaarList) {
+    return udhaarList.fold<double>(0.0, (sum, item) => sum + item.amountDue);
+  }
 
   void _openCollectDialog(DefaulterRecord defaulter) {
     MemberModel? member;
     try {
-      member = DummyData.members.firstWhere((m) => m.id == defaulter.id);
+      member = _membersProvider.allMembers.firstWhere((m) => m.id == defaulter.id);
     } catch (_) {
       member = MemberModel(
         id: defaulter.id,
@@ -30,8 +96,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         plan: defaulter.plan,
         expiryDate: DateTime.now().subtract(Duration(days: defaulter.daysOverdue)),
         isPaymentPending: true,
+        dueAmount: defaulter.amountDue,
         phone: defaulter.phone,
-        notes: 'Overdue Rs. ${AppSettings.formatAmount(defaulter.amountDue)}',
+        notes: 'Udhaar Rs. ${AppSettings.formatAmount(defaulter.amountDue)}',
       );
     }
 
@@ -69,6 +136,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   @override
   Widget build(BuildContext context) {
     final report = _report;
+    final udhaarList = _getCombinedUdhaarList(report);
+    final totalUdhaar = _getLiveTotalUdhaar(udhaarList);
+
+    // Add live collected payments from SQLite members on top of historical report for October 2026
+    final livePaidBonus = _selectedMonth == 'October 2026'
+        ? _membersProvider.allMembers.fold<double>(0.0, (s, m) => s + m.paidAmount)
+        : 0.0;
+    final effectiveRevenue = report.totalRevenue + livePaidBonus;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 24.0),
@@ -109,7 +184,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Analytics & Reports',
+                          'Analytics & Revenue Hub',
                           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                             fontWeight: FontWeight.bold,
                             fontSize: 22,
@@ -117,7 +192,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         ),
                         const SizedBox(height: 2),
                         const Text(
-                          'Lá Fitness Monthly Performance, Revenue & Operational Metrics',
+                          'Lá Fitness Revenue Performance, Payment Channels & Udhaar Recovery',
                           style: TextStyle(
                             color: AppColors.textSecondary,
                             fontSize: 12,
@@ -132,7 +207,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 // Controls: Month Dropdown + Export Buttons
                 Row(
                   children: [
-                    // Month by Reports Dropdown
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
                       decoration: BoxDecoration(
@@ -224,12 +298,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 children: [
                   _buildMetricCard(
                     title: 'Monthly Revenue',
-                    value: 'Rs. ${AppSettings.formatAmount(report.totalRevenue)}',
+                    value: 'Rs. ${AppSettings.formatAmount(effectiveRevenue)}',
                     icon: Icons.account_balance_wallet_rounded,
                     iconColor: AppColors.primary,
                     trend: report.revenueTrend,
                     isTrendUp: report.isRevenueUp,
-                    subtitle: 'Base Rs. ${AppSettings.formatAmount(report.baseMembershipRevenue)} + PT Rs. ${AppSettings.formatAmount(report.joiningAndPtRevenue)}',
+                    subtitle:
+                        'Base Rs. ${AppSettings.formatAmount(report.baseMembershipRevenue + livePaidBonus)} + PT Rs. ${AppSettings.formatAmount(report.joiningAndPtRevenue)}',
                   ),
                   _buildMetricCard(
                     title: 'Active Members',
@@ -238,16 +313,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     iconColor: AppColors.success,
                     trend: '+${report.newSignups} Sign-ups',
                     isTrendUp: true,
-                    subtitle: '${report.expiredCount} expired / due this month',
+                    subtitle: '${udhaarList.length} Udhaar / due accounts',
                   ),
                   _buildMetricCard(
                     title: 'Pending Dues (Udhaar)',
-                    value: 'Rs. ${AppSettings.formatAmount(report.pendingDues)}',
+                    value: 'Rs. ${AppSettings.formatAmount(totalUdhaar)}',
                     icon: Icons.warning_amber_rounded,
-                    iconColor: AppColors.error,
-                    trend: '${report.overdueCount} Defaulters',
+                    iconColor: AppColors.warning,
+                    trend: '${udhaarList.length} Udhaar Accounts',
                     isTrendUp: false,
-                    subtitle: 'Requires immediate fee recovery',
+                    subtitle: 'Actionable pending fee recovery',
                   ),
                   _buildMetricCard(
                     title: 'Average Daily Footfall',
@@ -264,77 +339,77 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           ),
           const SizedBox(height: 20),
 
-          // ROW 1: COMBINED BOTH PIES (ON THE LEFT) + CURRENT MONTH REVENUE GROWTH VS LAST MONTHS (ON THE RIGHT)
+          // MAIN ROW: ALL ABOUT REVENUE (LEFT) + OUTSTANDING DUES / UDHAAR SECTION (RIGHT)
           LayoutBuilder(
             builder: (context, constraints) {
               final isNarrow = constraints.maxWidth < 1050;
               if (isNarrow) {
                 return Column(
                   children: [
-                    _buildCombinedPiesCard(report),
+                    _buildRevenueAnalyticsCard(report, effectiveRevenue, totalUdhaar),
                     const SizedBox(height: 16),
-                    _buildRevenueGrowthBarChartCard(report),
+                    _buildDuesRecoveryCard(udhaarList, totalUdhaar),
                   ],
                 );
               }
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Left side: Both Pies combined into the same layout length
-                  Expanded(flex: 6, child: _buildCombinedPiesCard(report)),
+                  Expanded(
+                    flex: 7,
+                    child: _buildRevenueAnalyticsCard(report, effectiveRevenue, totalUdhaar),
+                  ),
                   const SizedBox(width: 16),
-                  // Right side: Bar graph of current month Revenue growth with last months
-                  Expanded(flex: 6, child: _buildRevenueGrowthBarChartCard(report)),
+                  Expanded(
+                    flex: 5,
+                    child: _buildDuesRecoveryCard(udhaarList, totalUdhaar),
+                  ),
                 ],
               );
             },
           ),
           const SizedBox(height: 20),
 
-          // ROW 2: PEAK HOURS HEATMAP + DUES RECOVERY (UDHAAR)
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isNarrow = constraints.maxWidth < 1050;
-              if (isNarrow) {
-                return Column(
-                  children: [
-                    _buildPeakHoursHeatmapCard(),
-                    const SizedBox(height: 16),
-                    _buildDuesRecoveryCard(report),
-                  ],
-                );
-              }
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 7, child: _buildPeakHoursHeatmapCard()),
-                  const SizedBox(width: 16),
-                  Expanded(flex: 5, child: _buildDuesRecoveryCard(report)),
-                ],
-              );
-            },
-          ),
+          // BOTTOM ROW: FULL-WIDTH PEAK HOURS & TURNSTILE FLOW HEATMAP
+          _buildPeakHoursHeatmapCard(),
         ],
       ),
     );
   }
 
-  // --- COMBINED BOTH PIE CHARTS (LEFT SIDE) ---
-  Widget _buildCombinedPiesCard(MonthlyAnalyticsReport report) {
-    final paymentEntries = report.paymentMethods.entries.toList();
-    final paymentColors = [
-      const Color(0xFF66BB6A), // Cash
-      const Color(0xFF42A5F5), // Cards
-      const Color(0xFFFFA726), // Bank Transfer
-      AppColors.primary,       // Mobile Wallet
-    ];
+  // --- COMPREHENSIVE REVENUE ANALYTICS CARD (ALL ABOUT REVENUE, NO PIE CHARTS) ---
+  Widget _buildRevenueAnalyticsCard(
+    MonthlyAnalyticsReport report,
+    double effectiveRevenue,
+    double totalUdhaar,
+  ) {
+    final count = report.historyMonths.length;
+    final startIndex = (count >= 5) ? count - 5 : 0;
+    final compareMonths = report.historyMonths.sublist(startIndex);
+    final compareBase = List<double>.from(report.historyBaseRevenue.sublist(startIndex));
+    final comparePt = List<double>.from(report.historyPtRevenue.sublist(startIndex));
 
-    final planEntries = report.planMembers.entries.toList();
-    final planColors = [
-      AppColors.primary,           // Basic
-      const Color(0xFF42A5F5),     // Silver
-      const Color(0xFFAB47BC),     // Gold
-      const Color(0xFFFF7043),     // Platinum
+    if (compareBase.isNotEmpty) {
+      final extra = effectiveRevenue - report.totalRevenue;
+      if (extra > 0) {
+        compareBase[compareBase.length - 1] += extra;
+      }
+    }
+
+    double prevTotal = 0;
+    if (compareBase.length >= 2) {
+      prevTotal = compareBase[compareBase.length - 2] + comparePt[comparePt.length - 2];
+    }
+    final curTotal = effectiveRevenue;
+    final diff = curTotal - prevTotal;
+    final growthPct = prevTotal > 0 ? ((diff / prevTotal) * 100).toStringAsFixed(1) : '12.8';
+
+    final paymentEntries = report.paymentMethods.entries.toList();
+    final channelColors = [
+      const Color(0xFF10B981), // Cash
+      const Color(0xFF42A5F5), // Card
+      const Color(0xFFFFA726), // Bank Transfer
+      AppColors.primary, // JazzCash / Easypaisa
     ];
 
     return Card(
@@ -356,264 +431,29 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Payment Methods & Plan Distribution',
-                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                      'Revenue Performance & Channel Breakdown',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                     ),
                     SizedBox(height: 4),
                     Text(
-                      'Reconciliation of revenue channels alongside active subscription tiers',
+                      'Monthly revenue trajectory, fee stream split, and payment collection channels',
                       style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
                     ),
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
-                  ),
-                  child: Text(
-                    '$_selectedMonth Breakdown',
-                    style: const TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // Side-by-side Pies in the same layout length
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // PIE 1: Payment Methods Reconcile
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      const Text(
-                        'Payment Channels',
-                        style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textPrimary, fontSize: 13),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 140,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Text('Total', style: TextStyle(color: AppColors.textSecondary, fontSize: 10)),
-                                Text(
-                                  'Rs. ${(report.totalRevenue / 1000).toInt()}k',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textPrimary, fontSize: 13),
-                                ),
-                              ],
-                            ),
-                            PieChart(
-                              PieChartData(
-                                sectionsSpace: 2,
-                                centerSpaceRadius: 38,
-                                sections: List.generate(paymentEntries.length, (i) {
-                                  final val = paymentEntries[i].value;
-                                  return PieChartSectionData(
-                                    color: paymentColors[i % paymentColors.length],
-                                    value: val,
-                                    title: '${val.toInt()}%',
-                                    radius: 26,
-                                    titleStyle: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black, fontSize: 10),
-                                  );
-                                }),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      // Compact Legend for Payments
-                      Column(
-                        children: List.generate(paymentEntries.length, (i) {
-                          final item = paymentEntries[i];
-                          final color = paymentColors[i % paymentColors.length];
-                          final amount = report.totalRevenue * (item.value / 100);
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 3.0),
-                            child: Row(
-                              children: [
-                                Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    item.key,
-                                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 11, fontWeight: FontWeight.w500),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                Text(
-                                  'Rs. ${AppSettings.formatAmount(amount)}',
-                                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Vertical Divider between the two pies
-                Container(
-                  height: 250,
-                  width: 1,
-                  margin: const EdgeInsets.symmetric(horizontal: 16),
-                  color: AppColors.border,
-                ),
-
-                // PIE 2: Plan Popularity & Tiers
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      const Text(
-                        'Membership Tiers',
-                        style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textPrimary, fontSize: 13),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 140,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Text('Active', style: TextStyle(color: AppColors.textSecondary, fontSize: 10)),
-                                Text(
-                                  '${report.activeMembers}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textPrimary, fontSize: 14),
-                                ),
-                              ],
-                            ),
-                            PieChart(
-                              PieChartData(
-                                sectionsSpace: 2,
-                                centerSpaceRadius: 38,
-                                sections: List.generate(planEntries.length, (i) {
-                                  final count = planEntries[i].value;
-                                  final pct = (count / report.activeMembers * 100).toInt();
-                                  return PieChartSectionData(
-                                    color: planColors[i % planColors.length],
-                                    value: count.toDouble(),
-                                    title: '$pct%',
-                                    radius: 26,
-                                    titleStyle: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black, fontSize: 10),
-                                  );
-                                }),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      // Compact Legend for Plans
-                      Column(
-                        children: List.generate(planEntries.length, (i) {
-                          final item = planEntries[i];
-                          final color = planColors[i % planColors.length];
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 3.0),
-                            child: Row(
-                              children: [
-                                Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    item.key,
-                                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 11, fontWeight: FontWeight.w500),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                Text(
-                                  '${item.value} members',
-                                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 11, fontWeight: FontWeight.bold),
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // --- BAR GRAPH: CURRENT MONTH REVENUE GROWTH WITH LAST MONTHS (RIGHT SIDE) ---
-  Widget _buildRevenueGrowthBarChartCard(MonthlyAnalyticsReport report) {
-    // Take the last 3-4 months up to current
-    final count = report.historyMonths.length;
-    final startIndex = (count >= 4) ? count - 4 : 0;
-    final compareMonths = report.historyMonths.sublist(startIndex);
-    final compareBase = report.historyBaseRevenue.sublist(startIndex);
-    final comparePt = report.historyPtRevenue.sublist(startIndex);
-
-    // Calculate growth between previous and current month
-    double prevTotal = 0;
-    if (compareBase.length >= 2) {
-      prevTotal = compareBase[compareBase.length - 2] + comparePt[comparePt.length - 2];
-    }
-    final curTotal = report.totalRevenue;
-    final diff = curTotal - prevTotal;
-    final growthPct = prevTotal > 0 ? ((diff / prevTotal) * 100).toStringAsFixed(1) : '12.8';
-
-    return Card(
-      color: AppColors.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: AppColors.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(22.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Revenue Growth (vs. Last Months)',
-                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Current month performance benchmarked against recent quarters',
-                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-                    ),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: AppColors.success.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: AppColors.success.withValues(alpha: 0.4)),
                   ),
                   child: Row(
                     children: [
                       const Icon(Icons.trending_up_rounded, color: AppColors.success, size: 16),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: 5),
                       Text(
-                        '+$growthPct% Growth',
+                        '+$growthPct% Revenue Growth',
                         style: const TextStyle(color: AppColors.success, fontSize: 12, fontWeight: FontWeight.bold),
                       ),
                     ],
@@ -621,27 +461,45 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
 
-            // Top Highlights for Growth
+            // 4 Revenue KPI Strip Badges
             Row(
               children: [
-                _buildGrowthStatBadge('Current Month', 'Rs. ${AppSettings.formatAmount(curTotal)}', AppColors.primary),
-                const SizedBox(width: 12),
-                _buildGrowthStatBadge('Previous Month', 'Rs. ${AppSettings.formatAmount(prevTotal)}', AppColors.textSecondary),
-                const SizedBox(width: 12),
-                _buildGrowthStatBadge('Net Increase', '+Rs. ${AppSettings.formatAmount(diff.abs())}', AppColors.success),
+                _buildGrowthStatBadge(
+                  'Collected Revenue',
+                  'Rs. ${AppSettings.formatAmount(curTotal)}',
+                  AppColors.primary,
+                ),
+                const SizedBox(width: 10),
+                _buildGrowthStatBadge(
+                  'Previous Month',
+                  'Rs. ${AppSettings.formatAmount(prevTotal)}',
+                  AppColors.textSecondary,
+                ),
+                const SizedBox(width: 10),
+                _buildGrowthStatBadge(
+                  'Net Gain',
+                  '${diff >= 0 ? '+' : '-'}Rs. ${AppSettings.formatAmount(diff.abs())}',
+                  diff >= 0 ? AppColors.success : AppColors.error,
+                ),
+                const SizedBox(width: 10),
+                _buildGrowthStatBadge(
+                  'Pending Udhaar',
+                  'Rs. ${AppSettings.formatAmount(totalUdhaar)}',
+                  AppColors.warning,
+                ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 22),
 
-            // Bar Chart showing Current Month with Last Months
+            // Bar Chart: Monthly Revenue Trajectory
             SizedBox(
-              height: 200,
+              height: 210,
               child: BarChart(
                 BarChartData(
                   alignment: BarChartAlignment.spaceAround,
-                  maxY: 550,
+                  maxY: 600,
                   minY: 0,
                   barTouchData: BarTouchData(
                     enabled: true,
@@ -651,7 +509,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         final isCurrent = groupIndex == compareMonths.length - 1;
                         final total = rod.toY.toInt();
                         return BarTooltipItem(
-                          '$mName ${isCurrent ? "(Current)" : ""}\nRs. ${total}k Total',
+                          '$mName ${isCurrent ? "(Current)" : ""}\nRs. ${total}k Collected',
                           const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                         );
                       },
@@ -686,7 +544,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 55,
-                        interval: 100, // strictly every 100k
+                        interval: 100,
                         getTitlesWidget: (value, meta) {
                           if (value % 100 != 0 || value == 0) return const SizedBox();
                           return Text(
@@ -715,15 +573,25 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       x: i,
                       barRods: [
                         BarChartRodData(
-                          toY: baseK + ptK,
-                          width: 32,
+                          toY: (baseK + ptK).clamp(0, 590),
+                          width: 34,
                           borderRadius: BorderRadius.circular(6),
                           borderSide: isCurrent
                               ? const BorderSide(color: AppColors.primary, width: 2)
                               : BorderSide.none,
                           rodStackItems: [
-                            BarChartRodStackItem(0, baseK, isCurrent ? AppColors.primary : AppColors.primary.withValues(alpha: 0.6)),
-                            BarChartRodStackItem(baseK, baseK + ptK, isCurrent ? const Color(0xFF42A5F5) : const Color(0xFF42A5F5).withValues(alpha: 0.6)),
+                            BarChartRodStackItem(
+                              0,
+                              baseK,
+                              isCurrent ? AppColors.primary : AppColors.primary.withValues(alpha: 0.65),
+                            ),
+                            BarChartRodStackItem(
+                              baseK,
+                              baseK + ptK,
+                              isCurrent
+                                  ? const Color(0xFF42A5F5)
+                                  : const Color(0xFF42A5F5).withValues(alpha: 0.65),
+                            ),
                           ],
                         ),
                       ],
@@ -739,9 +607,97 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _buildChartLegend('Base Memberships', AppColors.primary),
-                const SizedBox(width: 16),
-                _buildChartLegend('Joining & Personal Training', const Color(0xFF42A5F5)),
+                const SizedBox(width: 20),
+                _buildChartLegend('Joining Fee & Personal Training', const Color(0xFF42A5F5)),
               ],
+            ),
+
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Divider(color: AppColors.border, height: 1),
+            ),
+
+            // Horizontal Revenue Breakdown by Payment Method (No Pie Charts)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Revenue by Payment Method',
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                ),
+                Text(
+                  '$_selectedMonth Collection Channels',
+                  style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 10,
+              children: List.generate(paymentEntries.length, (i) {
+                final entry = paymentEntries[i];
+                final color = channelColors[i % channelColors.length];
+                final pct = entry.value;
+                final amount = curTotal * (pct / 100.0);
+                return Container(
+                  width: 225,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.background,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              entry.key,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textPrimary,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            '${pct.toInt()}%',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                              color: color,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        'Rs. ${AppSettings.formatAmount(amount)}',
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: (pct / 100.0).clamp(0.0, 1.0),
+                          minHeight: 5,
+                          backgroundColor: AppColors.border,
+                          valueColor: AlwaysStoppedAnimation<Color>(color),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
             ),
           ],
         ),
@@ -752,18 +708,195 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   Widget _buildGrowthStatBadge(String label, String value, Color color) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: AppColors.background,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(color: AppColors.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 10)),
-            const SizedBox(height: 2),
-            Text(value, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.bold)),
+            Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 10.5)),
+            const SizedBox(height: 3),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- DUES RECOVERY (UDHAAR) CARD (ON THE RIGHT OF REVENUE) ---
+  Widget _buildDuesRecoveryCard(List<DefaulterRecord> udhaarList, double totalUdhaar) {
+    return Card(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: const BorderSide(color: AppColors.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(22.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.account_balance_wallet_rounded, color: AppColors.warning, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Outstanding Dues (Udhaar)',
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                    ),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.warning.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.warning.withValues(alpha: 0.45)),
+                  ),
+                  child: Text(
+                    'Rs. ${AppSettings.formatAmount(totalUdhaar)} Due',
+                    style: const TextStyle(color: AppColors.warning, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Members with pending Udhaar balances (${udhaarList.length} accounts) — click Collect to settle',
+              style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            if (udhaarList.isEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 48),
+                alignment: Alignment.center,
+                child: const Column(
+                  children: [
+                    Icon(Icons.check_circle_outline_rounded, color: AppColors.success, size: 40),
+                    SizedBox(height: 10),
+                    Text(
+                      'Zero Pending Udhaar!',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'All member balances are fully settled.',
+                      style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                    ),
+                  ],
+                ),
+              )
+            else
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 410),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: udhaarList.length,
+                  separatorBuilder: (context, index) => const Divider(height: 16, color: AppColors.border),
+                  itemBuilder: (context, index) {
+                    final d = udhaarList[index];
+                    final statusLabel = d.daysOverdue > 0
+                        ? '${d.plan} • Overdue ${d.daysOverdue}d'
+                        : '${d.plan} • Pending Udhaar';
+                    return Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 17,
+                          backgroundColor: AppColors.warning.withValues(alpha: 0.15),
+                          child: Text(
+                            d.name.isNotEmpty ? d.name[0].toUpperCase() : 'M',
+                            style: const TextStyle(
+                              color: AppColors.warning,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      d.name,
+                                      style: const TextStyle(
+                                        color: AppColors.textPrimary,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '(${d.id})',
+                                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                statusLabel,
+                                style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              'Rs. ${AppSettings.formatAmount(d.amountDue)}',
+                              style: const TextStyle(
+                                color: AppColors.warning,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13.5,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            InkWell(
+                              onTap: () => _openCollectDialog(d),
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4.5),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text(
+                                  'Collect',
+                                  style: TextStyle(
+                                    color: Colors.black,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
           ],
         ),
       ),
@@ -792,24 +925,55 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Peak Hours & Turnstile Flow', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                    Text(
+                      'Peak Hours & Turnstile Flow',
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                    ),
                     SizedBox(height: 4),
-                    Text('Check-in volume heatmap across weekly operating hours', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    Text(
+                      'Check-in volume heatmap across weekly operating hours',
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                    ),
                   ],
                 ),
                 Row(
                   children: [
                     const Text('Low', style: TextStyle(color: AppColors.textSecondary, fontSize: 11)),
                     const SizedBox(width: 6),
-                    Container(width: 12, height: 12, decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2))),
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)),
+                    ),
                     const SizedBox(width: 4),
-                    Container(width: 12, height: 12, decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(2))),
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
                     const SizedBox(width: 4),
-                    Container(width: 12, height: 12, decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(2))),
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
                     const SizedBox(width: 4),
-                    Container(width: 12, height: 12, decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(2))),
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(2)),
+                    ),
                     const SizedBox(width: 6),
-                    const Text('Peak', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 11)),
+                    const Text(
+                      'Peak',
+                      style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 11),
+                    ),
                   ],
                 ),
               ],
@@ -843,7 +1007,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           children: [
                             SizedBox(
                               width: 45,
-                              child: Text(days[dayIdx], style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.textSecondary, fontSize: 12)),
+                              child: Text(
+                                days[dayIdx],
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
                             ),
                             ...List.generate(hours.length, (hourIdx) {
                               final h = hours[hourIdx];
@@ -870,7 +1041,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                               }
 
                               return Tooltip(
-                                message: '${days[dayIdx]} ${h > 12 ? '${h - 12} PM' : (h == 12 ? '12 PM' : '$h AM')}: ${(intensity * 95).toInt()} Check-ins',
+                                message:
+                                    '${days[dayIdx]} ${h > 12 ? '${h - 12} PM' : (h == 12 ? '12 PM' : '$h AM')}: ${(intensity * 95).toInt()} Check-ins',
                                 child: Container(
                                   width: cellWidth - 2,
                                   height: 20,
@@ -886,109 +1058,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         ),
                       );
                     }),
-                  ],
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // --- DUES RECOVERY (UDHAAR) CARD ---
-  Widget _buildDuesRecoveryCard(MonthlyAnalyticsReport report) {
-    return Card(
-      color: AppColors.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: AppColors.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(22.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.report_problem_rounded, color: AppColors.error, size: 20),
-                    SizedBox(width: 8),
-                    Text('Outstanding Dues (Udhaar)', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppColors.error.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: AppColors.error.withValues(alpha: 0.4)),
-                  ),
-                  child: Text(
-                    'Rs. ${AppSettings.formatAmount(report.pendingDues)} Due',
-                    style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.bold, fontSize: 12),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            const Text('Actionable list of members with pending gym fee balances', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-            const SizedBox(height: 16),
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: report.defaulters.length,
-              separatorBuilder: (context, index) => const Divider(height: 16, color: AppColors.border),
-              itemBuilder: (context, index) {
-                final d = report.defaulters[index];
-                return Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 16,
-                      backgroundColor: AppColors.error.withValues(alpha: 0.15),
-                      child: Text(
-                        d.name.isNotEmpty ? d.name[0] : 'M',
-                        style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(d.name, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
-                              const SizedBox(width: 6),
-                              Text('(${d.id})', style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text('${d.plan} • Overdue ${d.daysOverdue}d', style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
-                        ],
-                      ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text('Rs. ${AppSettings.formatAmount(d.amountDue)}', style: const TextStyle(color: AppColors.error, fontWeight: FontWeight.bold, fontSize: 13)),
-                        const SizedBox(height: 4),
-                        InkWell(
-                          onTap: () => _openCollectDialog(d),
-                          borderRadius: BorderRadius.circular(6),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: AppColors.primary,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text('Collect', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11)),
-                          ),
-                        ),
-                      ],
-                    ),
                   ],
                 );
               },
@@ -1091,7 +1160,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(width: 10, height: 10, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))),
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2)),
+        ),
         const SizedBox(width: 6),
         Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11, fontWeight: FontWeight.w600)),
       ],

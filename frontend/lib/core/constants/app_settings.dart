@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:gym_system/core/services/api_service.dart';
+
 class MembershipPlanConfig {
   final String id;
   final String name;
@@ -28,9 +32,31 @@ class MembershipPlanConfig {
       description: description ?? this.description,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'price': price,
+        'durationDays': durationDays,
+        'description': description,
+      };
+
+  factory MembershipPlanConfig.fromJson(Map<String, dynamic> json) {
+    return MembershipPlanConfig(
+      id: json['id']?.toString() ?? 'plan',
+      name: json['name']?.toString() ?? 'Plan',
+      price: (json['price'] is num)
+          ? (json['price'] as num).toDouble()
+          : (double.tryParse(json['price']?.toString() ?? '0') ?? 0.0),
+      durationDays: (json['durationDays'] is num)
+          ? (json['durationDays'] as num).toInt()
+          : (int.tryParse(json['durationDays']?.toString() ?? '30') ?? 30),
+      description: json['description']?.toString() ?? '',
+    );
+  }
 }
 
-class AppSettings {
+class AppSettings extends ChangeNotifier {
   static final AppSettings _instance = AppSettings._internal();
   factory AppSettings() => _instance;
   static AppSettings get instance => _instance;
@@ -120,11 +146,102 @@ class AppSettings {
   String templateExpired = defaultTemplateExpired;
   String templateReceipt = defaultTemplateReceipt;
 
+  void notifyChanged() {
+    notifyListeners();
+  }
+
+  /// Syncs all current toggles, plans, payment methods, and templates to SQLite backend
+  Future<bool> syncToServer() async {
+    notifyListeners();
+    try {
+      return await ApiService.instance.updateWhatsAppSettings({
+        'enable_joining_fee': enableJoiningFee.toString(),
+        'joining_fee_amount': joiningFeeAmount.toInt().toString(),
+        'plans_json': jsonEncode(plans.map((p) => p.toJson()).toList()),
+        'payment_methods_json': jsonEncode(paymentMethods),
+        'enable_expiry_alerts': sendExpiryAlert.toString(),
+        'enable_payment_receipts': sendPaymentReceipt.toString(),
+        'enable_welcome_msg': sendWelcomeMessage.toString(),
+        'template_welcome': templateWelcome,
+        'template_due': templateDue,
+        'template_expired': templateExpired,
+        'template_receipt': templateReceipt,
+      });
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Loads persisted toggles, plans, payment methods, and templates from SQLite backend
+  Future<void> loadFromServer() async {
+    try {
+      final s = await ApiService.instance.getWhatsAppSettings();
+      if (s == null) return;
+
+      if (s['enable_joining_fee'] != null) {
+        enableJoiningFee = s['enable_joining_fee'].toString() == 'true';
+      }
+      if (s['joining_fee_amount'] != null) {
+        final parsed = double.tryParse(s['joining_fee_amount'].toString());
+        if (parsed != null && parsed >= 0) joiningFeeAmount = parsed;
+      }
+      if (s['plans_json'] != null && s['plans_json'].toString().isNotEmpty) {
+        try {
+          final decoded = jsonDecode(s['plans_json'].toString()) as List<dynamic>;
+          if (decoded.isNotEmpty) {
+            plans = decoded
+                .map((item) =>
+                    MembershipPlanConfig.fromJson(item as Map<String, dynamic>))
+                .toList();
+          }
+        } catch (_) {}
+      }
+      if (s['payment_methods_json'] != null &&
+          s['payment_methods_json'].toString().isNotEmpty) {
+        try {
+          final decoded =
+              jsonDecode(s['payment_methods_json'].toString()) as List<dynamic>;
+          final loadedMethods =
+              decoded.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+          if (loadedMethods.isNotEmpty) {
+            paymentMethods = loadedMethods;
+          }
+        } catch (_) {}
+      }
+      if (s['enable_expiry_alerts'] != null) {
+        sendExpiryAlert = s['enable_expiry_alerts'].toString() == 'true';
+      }
+      if (s['enable_payment_receipts'] != null) {
+        sendPaymentReceipt = s['enable_payment_receipts'].toString() == 'true';
+      }
+      if (s['enable_welcome_msg'] != null) {
+        sendWelcomeMessage = s['enable_welcome_msg'].toString() == 'true';
+      }
+      if (s['template_welcome'] != null &&
+          s['template_welcome'].toString().isNotEmpty) {
+        templateWelcome = s['template_welcome'].toString();
+      }
+      if (s['template_due'] != null && s['template_due'].toString().isNotEmpty) {
+        templateDue = s['template_due'].toString();
+      }
+      if (s['template_expired'] != null &&
+          s['template_expired'].toString().isNotEmpty) {
+        templateExpired = s['template_expired'].toString();
+      }
+      if (s['template_receipt'] != null &&
+          s['template_receipt'].toString().isNotEmpty) {
+        templateReceipt = s['template_receipt'].toString();
+      }
+      notifyListeners();
+    } catch (_) {}
+  }
+
   void resetTemplatesToDefault() {
     templateWelcome = defaultTemplateWelcome;
     templateDue = defaultTemplateDue;
     templateExpired = defaultTemplateExpired;
     templateReceipt = defaultTemplateReceipt;
+    notifyListeners();
   }
 
   String renderTemplate(String template, Map<String, String> vars) {
@@ -139,7 +256,6 @@ class AppSettings {
     return out;
   }
 
-
   // Security
   bool requireManagerPin = false;
   String managerPin = '1234';
@@ -149,13 +265,14 @@ class AppSettings {
 
   double getPlanPrice(String planName) {
     final clean = planName.trim().toLowerCase();
+    // Visitor Pass is always FREE (Rs. 0)
+    if (clean.contains('visitor') || clean.contains('guest')) return 0.0;
     for (final p in plans) {
       if (p.name.toLowerCase() == clean || clean.contains(p.id)) {
         return p.price;
       }
     }
     // Fallback matches
-    if (clean.contains('visitor')) return 500.0;
     if (clean.contains('silver')) return 18000.0;
     if (clean.contains('gold')) return 30000.0;
     if (clean.contains('platinum') || clean.contains('vip')) return 65000.0;
@@ -164,12 +281,12 @@ class AppSettings {
 
   int getPlanDurationDays(String planName) {
     final clean = planName.trim().toLowerCase();
+    if (clean.contains('visitor') || clean.contains('guest')) return 1;
     for (final p in plans) {
       if (p.name.toLowerCase() == clean || clean.contains(p.id)) {
         return p.durationDays;
       }
     }
-    if (clean.contains('visitor')) return 1;
     if (clean.contains('silver')) return 90;
     if (clean.contains('gold')) return 180;
     if (clean.contains('platinum') || clean.contains('vip')) return 365;

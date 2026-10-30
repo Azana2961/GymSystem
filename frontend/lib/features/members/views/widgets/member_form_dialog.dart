@@ -24,6 +24,7 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
   late TextEditingController _phoneController;
   late TextEditingController _emailController;
   late TextEditingController _discountController;
+  late TextEditingController _udhaarController;
 
   String _selectedPlan = 'Basic Plan';
   String? _selectedGender;
@@ -45,6 +46,9 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
     _phoneController = TextEditingController(text: m?.phone ?? '');
     _emailController = TextEditingController(text: m?.email ?? '');
     _discountController = TextEditingController(text: '0');
+    _udhaarController = TextEditingController(
+      text: (m != null && m.dueAmount > 0) ? m.dueAmount.toInt().toString() : '0',
+    );
 
     _includeJoiningFee = _settings.enableJoiningFee;
     _selectedPaymentMethod = _settings.paymentMethods.first;
@@ -70,17 +74,25 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
     _phoneController.dispose();
     _emailController.dispose();
     _discountController.dispose();
+    _udhaarController.dispose();
     super.dispose();
   }
 
-  double get _planFee => _isVisitor ? _settings.getPlanPrice('Visitor Pass') : _settings.getPlanPrice(_selectedPlan);
+  double get _planFee => _isVisitor ? 0.0 : _settings.getPlanPrice(_selectedPlan);
 
   double get _joiningFee =>
       (!_isVisitor && _includeJoiningFee && _settings.enableJoiningFee) ? _settings.joiningFeeAmount : 0.0;
 
-  double get _discount => double.tryParse(_discountController.text.trim()) ?? 0.0;
+  double get _discount => _isVisitor ? 0.0 : (double.tryParse(_discountController.text.trim()) ?? 0.0);
 
-  double get _finalPrice => (_planFee + _joiningFee - _discount).clamp(0.0, double.infinity);
+  double get _finalPrice => _isVisitor ? 0.0 : (_planFee + _joiningFee - _discount).clamp(0.0, double.infinity);
+
+  double get _udhaarAmount => _isVisitor
+      ? 0.0
+      : (double.tryParse(_udhaarController.text.trim().replaceAll(',', '')) ?? 0.0)
+          .clamp(0.0, _finalPrice);
+
+  double get _paidNowAmount => (_finalPrice - _udhaarAmount).clamp(0.0, _finalPrice);
 
   String _generatePassToken(bool visitor) {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -131,25 +143,34 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
         return;
       }
 
-      final formattedPrice = AppSettings.formatAmount(_finalPrice);
+      final formattedPaid = AppSettings.formatAmount(_paidNowAmount);
+      final formattedUdhaar = AppSettings.formatAmount(_udhaarAmount);
       final generatedToken = widget.memberToEdit?.qrToken ?? _generatePassToken(_isVisitor);
+      final methodUsed = _isVisitor ? 'Free Pass' : _selectedPaymentMethod;
+      final hasDue = !_isVisitor && _udhaarAmount > 0;
       final member = MemberModel(
         id: widget.memberToEdit?.id ?? '${_isVisitor ? 'V' : 'M'}${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
         name: _nameController.text.trim(),
         plan: _isVisitor ? 'Visitor Pass' : _selectedPlan,
         expiryDate: _expiryDate!,
-        isPaymentPending: false, // Paid upon registration
+        isPaymentPending: hasDue,
+        dueAmount: _udhaarAmount,
+        paidAmount: _paidNowAmount,
         phone: _phoneController.text.trim().isNotEmpty ? _phoneController.text.trim() : null,
         email: _emailController.text.trim().isNotEmpty ? _emailController.text.trim() : null,
         startDate: _startDate,
         gender: _selectedGender,
-        notes: 'Paid Rs. $formattedPrice via $_selectedPaymentMethod',
-        isActive: true,
+        notes: _isVisitor
+            ? 'Free Visitor Pass (Rs. 0)'
+            : (hasDue
+                ? 'Paid Rs. $formattedPaid via $methodUsed • Udhaar Due: Rs. $formattedUdhaar'
+                : 'Paid Rs. $formattedPaid via $methodUsed'),
+        isActive: !hasDue,
         qrToken: generatedToken,
       );
 
       if (widget.memberToEdit != null) {
-        widget.provider.updateMember(member);
+        widget.provider.updateMember(member, paidAmount: _paidNowAmount, paymentMethod: methodUsed);
         final dummyIdx = DummyData.members.indexWhere((m) => m.id == member.id);
         if (dummyIdx != -1) {
           DummyData.members[dummyIdx] = member;
@@ -162,10 +183,14 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Member saved & synced to all Tablet Kiosks for offline scanning!'),
-          backgroundColor: AppColors.success,
-          duration: Duration(seconds: 3),
+        SnackBar(
+          content: Text(
+            hasDue
+                ? 'Member saved with Rs. $formattedUdhaar Udhaar (Due) & synced to Kiosks!'
+                : 'Member saved & synced to all Tablet Kiosks for offline scanning!',
+          ),
+          backgroundColor: hasDue ? AppColors.warning : AppColors.success,
+          duration: const Duration(seconds: 3),
         ),
       );
 
@@ -180,8 +205,8 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
           planFee: _planFee,
           admissionFee: _joiningFee,
           discount: _discount,
-          totalPaid: _finalPrice,
-          paymentMethod: _selectedPaymentMethod,
+          totalPaid: _paidNowAmount,
+          paymentMethod: methodUsed,
           isNewRegistration: widget.memberToEdit == null,
         ),
       );
@@ -314,15 +339,31 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
                               Row(
                                 children: [
                                   const Text(
-                                    'Visitor / Guest Pass',
+                                    'Visitor / Guest Pass (Free)',
                                     style: TextStyle(
                                       color: AppColors.textPrimary,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 14,
                                     ),
                                   ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.success.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'FREE',
+                                      style: TextStyle(
+                                        color: AppColors.success,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ),
                                   if (_isVisitor) ...[
-                                    const SizedBox(width: 8),
+                                    const SizedBox(width: 6),
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                       decoration: BoxDecoration(
@@ -433,13 +474,13 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              _isVisitor ? 'Visitor Pass Fee' : '$_selectedPlan Fee',
+                              _isVisitor ? 'Visitor / Guest Pass' : '$_selectedPlan Fee',
                               style: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
                             ),
                             Text(
-                              'Rs. ${AppSettings.formatAmount(_planFee)}',
-                              style: const TextStyle(
-                                color: AppColors.textPrimary,
+                              _isVisitor ? 'FREE (Rs. 0)' : 'Rs. ${AppSettings.formatAmount(_planFee)}',
+                              style: TextStyle(
+                                color: _isVisitor ? AppColors.success : AppColors.textPrimary,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 15,
                               ),
@@ -448,8 +489,8 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
                         ),
                         const SizedBox(height: 12),
 
-                        // Joining Fee Toggle / Inclusion
-                        if (_settings.enableJoiningFee) ...[
+                        // Joining Fee Toggle / Inclusion (Hidden for Free Visitor Pass)
+                        if (!_isVisitor && _settings.enableJoiningFee) ...[
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
@@ -487,82 +528,232 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
                           const SizedBox(height: 12),
                         ],
 
-                        // Discount Row
-                        Row(
-                          children: [
-                            const Expanded(
-                              flex: 2,
-                              child: Text(
-                                'Discount (Rs.)',
-                                style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                        // Discount Row (Hidden for Free Visitor Pass)
+                        if (!_isVisitor) ...[
+                          Row(
+                            children: [
+                              const Expanded(
+                                flex: 2,
+                                child: Text(
+                                  'Discount (Rs.)',
+                                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                                ),
                               ),
-                            ),
-                            Expanded(
-                              flex: 2,
-                              child: SizedBox(
-                                height: 42,
-                                child: TextField(
-                                  controller: _discountController,
-                                  keyboardType: TextInputType.number,
-                                  onChanged: (_) => setState(() {}),
-                                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.bold),
-                                  decoration: InputDecoration(
-                                    prefixIcon: const Padding(
-                                      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 11),
-                                      child: Text('Rs.', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 13)),
+                              Expanded(
+                                flex: 2,
+                                child: SizedBox(
+                                  height: 42,
+                                  child: TextField(
+                                    controller: _discountController,
+                                    keyboardType: TextInputType.number,
+                                    onChanged: (_) => setState(() {}),
+                                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.bold),
+                                    decoration: InputDecoration(
+                                      prefixIcon: const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+                                        child: Text('Rs.', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 13)),
+                                      ),
+                                      filled: true,
+                                      fillColor: AppColors.surface,
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
+                                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
+                                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.primary)),
                                     ),
-                                    filled: true,
-                                    fillColor: AppColors.surface,
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
-                                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
-                                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.primary)),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+
+                          // Udhaar / Pending Due Balance Row
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Udhaar / Pending Due (Rs.)',
+                                      style: TextStyle(color: AppColors.warning, fontSize: 13, fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      children: [
+                                        InkWell(
+                                          onTap: () => setState(() => _udhaarController.text = '0'),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: _udhaarAmount == 0
+                                                  ? AppColors.success.withValues(alpha: 0.2)
+                                                  : AppColors.surface,
+                                              borderRadius: BorderRadius.circular(4),
+                                              border: Border.all(
+                                                color: _udhaarAmount == 0 ? AppColors.success : AppColors.border,
+                                              ),
+                                            ),
+                                            child: const Text(
+                                              'Full Paid',
+                                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.success),
+                                            ),
+                                          ),
+                                        ),
+                                        InkWell(
+                                          onTap: () => setState(() => _udhaarController.text = (_finalPrice / 2).round().toString()),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.surface,
+                                              borderRadius: BorderRadius.circular(4),
+                                              border: Border.all(color: AppColors.warning.withValues(alpha: 0.5)),
+                                            ),
+                                            child: const Text(
+                                              '50% Udhaar',
+                                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.warning),
+                                            ),
+                                          ),
+                                        ),
+                                        InkWell(
+                                          onTap: () => setState(() => _udhaarController.text = _finalPrice.toInt().toString()),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.surface,
+                                              borderRadius: BorderRadius.circular(4),
+                                              border: Border.all(color: AppColors.error.withValues(alpha: 0.5)),
+                                            ),
+                                            child: const Text(
+                                              'Full Udhaar',
+                                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.error),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Expanded(
+                                flex: 2,
+                                child: SizedBox(
+                                  height: 42,
+                                  child: TextField(
+                                    controller: _udhaarController,
+                                    keyboardType: TextInputType.number,
+                                    onChanged: (_) => setState(() {}),
+                                    style: const TextStyle(color: AppColors.warning, fontSize: 14, fontWeight: FontWeight.bold),
+                                    decoration: InputDecoration(
+                                      prefixIcon: const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+                                        child: Text('Rs.', style: TextStyle(color: AppColors.warning, fontWeight: FontWeight.bold, fontSize: 13)),
+                                      ),
+                                      filled: true,
+                                      fillColor: AppColors.surface,
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
+                                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: _udhaarAmount > 0 ? AppColors.warning : AppColors.border)),
+                                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.warning)),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                         const Divider(height: 24, color: AppColors.border),
 
-                        // FINAL PRICE DISPLAY
+                        // FINAL PRICE & UDHAAR DISPLAY
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           decoration: BoxDecoration(
-                            color: AppColors.primary.withValues(alpha: 0.12),
+                            color: (_isVisitor
+                                    ? AppColors.success
+                                    : (_udhaarAmount > 0 ? AppColors.warning : AppColors.primary))
+                                .withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: AppColors.primary.withValues(alpha: 0.5)),
+                            border: Border.all(
+                              color: (_isVisitor
+                                      ? AppColors.success
+                                      : (_udhaarAmount > 0 ? AppColors.warning : AppColors.primary))
+                                  .withValues(alpha: 0.5),
+                            ),
                           ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          child: Column(
                             children: [
-                              const Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
-                                    'FINAL PRICE / TOTAL PAYABLE',
-                                    style: TextStyle(
-                                      color: AppColors.primary,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                      letterSpacing: 0.5,
-                                    ),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _isVisitor
+                                            ? 'VISITOR PASS FEE'
+                                            : (_udhaarAmount > 0 ? 'AMOUNT PAID NOW' : 'FINAL PRICE / TOTAL PAYABLE'),
+                                        style: TextStyle(
+                                          color: _isVisitor
+                                              ? AppColors.success
+                                              : (_udhaarAmount > 0 ? AppColors.warning : AppColors.primary),
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                          letterSpacing: 0.5,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _isVisitor
+                                            ? 'Complimentary Guest Entry Pass'
+                                            : (_udhaarAmount > 0
+                                                ? 'Total Bill: Rs. ${AppSettings.formatAmount(_finalPrice)} • Remaining Udhaar: Rs. ${AppSettings.formatAmount(_udhaarAmount)}'
+                                                : 'Plan Fee + Joining Fee - Discount'),
+                                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                                      ),
+                                    ],
                                   ),
-                                  SizedBox(height: 2),
                                   Text(
-                                    'Plan Fee + Joining Fee - Discount',
-                                    style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                                    _isVisitor ? 'FREE' : 'Rs. ${AppSettings.formatAmount(_paidNowAmount)}',
+                                    style: TextStyle(
+                                      color: _isVisitor
+                                          ? AppColors.success
+                                          : (_udhaarAmount > 0 ? AppColors.warning : AppColors.primary),
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ],
                               ),
-                              Text(
-                                'Rs. ${AppSettings.formatAmount(_finalPrice)}',
-                                style: const TextStyle(
-                                  color: AppColors.primary,
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.bold,
+                              if (!_isVisitor && _udhaarAmount > 0) ...[
+                                const SizedBox(height: 8),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.warning.withValues(alpha: 0.16),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 15),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          'Udhaar Due: Rs. ${AppSettings.formatAmount(_udhaarAmount)} — Member will appear in DUE on attendance & in Analytics Udhaar list',
+                                          style: const TextStyle(
+                                            color: AppColors.warning,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
+                              ],
                             ],
                           ),
                         ),
@@ -571,39 +762,41 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
                   ),
                   const SizedBox(height: 20),
 
-                  // PAYMENT METHOD SECTION (from Settings)
-                  const Text(
-                    'Payment Method',
-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _settings.paymentMethods.map((method) {
-                      final isSelected = _selectedPaymentMethod == method;
-                      return ChoiceChip(
-                        avatar: isSelected
-                            ? const Icon(Icons.check_rounded, color: Colors.black, size: 16)
-                            : null,
-                        label: Text(method),
-                        selected: isSelected,
-                        onSelected: (_) => setState(() => _selectedPaymentMethod = method),
-                        selectedColor: AppColors.primary,
-                        backgroundColor: AppColors.background,
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.black : AppColors.textSecondary,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                          fontSize: 12,
-                        ),
-                        side: BorderSide(
-                          color: isSelected ? AppColors.primary : AppColors.border,
-                          width: 1,
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 28),
+                  // PAYMENT METHOD SECTION (from Settings - hidden when Visitor Pass is Free)
+                  if (!_isVisitor) ...[
+                    const Text(
+                      'Payment Method',
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _settings.paymentMethods.map((method) {
+                        final isSelected = _selectedPaymentMethod == method;
+                        return ChoiceChip(
+                          avatar: isSelected
+                              ? const Icon(Icons.check_rounded, color: Colors.black, size: 16)
+                              : null,
+                          label: Text(method),
+                          selected: isSelected,
+                          onSelected: (_) => setState(() => _selectedPaymentMethod = method),
+                          selectedColor: AppColors.primary,
+                          backgroundColor: AppColors.background,
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.black : AppColors.textSecondary,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                            fontSize: 12,
+                          ),
+                          side: BorderSide(
+                            color: isSelected ? AppColors.primary : AppColors.border,
+                            width: 1,
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 28),
+                  ],
 
                   // Action Buttons
                   Row(

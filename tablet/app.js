@@ -45,11 +45,14 @@ class GymKioskDB {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction('members', 'readwrite');
       const store = tx.objectStore('members');
+      const dueAmt = Number(member.due_amount || 0);
+      const rawStatus = member.status || 'paid';
       store.put({
         qr_token: member.qr_token || member.id,
         id: member.id || member.qr_token,
         name: member.name || 'Member',
-        status: member.status || 'paid',
+        status: (dueAmt > 0 && rawStatus === 'paid') ? 'due' : rawStatus,
+        due_amount: dueAmt,
         expiry_date: member.expiry_date || '',
         phone: member.phone || '',
         plan: member.plan || 'Standard',
@@ -68,11 +71,14 @@ class GymKioskDB {
       const tx = this.db.transaction('members', 'readwrite');
       const store = tx.objectStore('members');
       for (const m of membersList) {
+        const dueAmt = Number(m.due_amount || 0);
+        const rawStatus = m.status || 'paid';
         store.put({
           qr_token: m.qr_token || m.id,
           id: m.id || m.qr_token,
           name: m.name || 'Member',
-          status: m.status || 'paid',
+          status: (dueAmt > 0 && rawStatus === 'paid') ? 'due' : rawStatus,
+          due_amount: dueAmt,
           expiry_date: m.expiry_date || '',
           phone: m.phone || '',
           plan: m.plan || 'Standard',
@@ -733,14 +739,25 @@ class TabletKioskApp {
 
     const timestamp = new Date().toISOString();
 
-    // Check if this is a Visitor QR (or check local cached member)
+    // Preview member status locally ('visitor' -> Blue, 'due' -> Orange, 'expired' -> Red, 'paid' -> Green)
     const cachedMember = await this.db.findMember(cleanToken);
     const isVisitorQr =
       cleanToken.toUpperCase().startsWith('VIS-') ||
       (cachedMember && (cachedMember.status === 'visitor' || String(cachedMember.plan || '').toLowerCase().includes('visitor')));
+    let previewStatus = isVisitorQr ? 'visitor' : (cachedMember?.status || 'paid');
+    if (!isVisitorQr && cachedMember) {
+      if (Number(cachedMember.due_amount || 0) > 0) previewStatus = 'due';
+      if (cachedMember.expiry_date && new Date(cachedMember.expiry_date) < new Date()) {
+        previewStatus = 'expired';
+      }
+    }
 
-    // Capture live photo from camera when scanning a Visitor QR
-    const visitorPhotoBase64 = isVisitorQr ? this.captureCameraSnapshot() : null;
+    const requiresPhoto = previewStatus === 'visitor' || previewStatus === 'due' || previewStatus === 'expired';
+    let visitorPhotoBase64 = null;
+
+    if (requiresPhoto) {
+      visitorPhotoBase64 = await this.runStayStillPhotoCapture(previewStatus, cachedMember?.name || cleanToken);
+    }
 
     // 1. Attempt ONLINE Scan via PC API
     if (this.isOnline) {
@@ -764,6 +781,7 @@ class TabletKioskApp {
             memberName: json.member?.name || 'Member',
             plan: json.member?.plan || 'Active Pass',
             expiryDate: json.member?.expiry_date || '',
+            dueAmount: Number(json.member?.due_amount || 0),
             qrToken: cleanToken,
             visitorPhoto: visitorPhotoBase64
           });
@@ -777,6 +795,61 @@ class TabletKioskApp {
 
     // 2. OFFLINE Attendance Scan (Local IndexedDB Verification)
     await this.handleOfflineScan(cleanToken, timestamp, visitorPhotoBase64);
+  }
+
+  async runStayStillPhotoCapture(status, memberName) {
+    const colorMap = {
+      visitor: '#00B0FF',
+      due: '#FF9100',
+      expired: '#FF1744',
+      paid: '#00E676'
+    };
+    const labelMap = {
+      visitor: 'VISITOR PASS',
+      due: 'UDHAAR / PAYMENT DUE',
+      expired: 'MEMBERSHIP EXPIRED'
+    };
+    const color = colorMap[status] || '#00B0FF';
+    const label = labelMap[status] || 'VERIFICATION';
+
+    const scanFrame = document.querySelector('.scan-frame');
+    const promptSpan = document.querySelector('.scan-prompt span');
+    const promptBox = document.querySelector('.scan-prompt');
+    const origPrompt = promptSpan ? promptSpan.innerText : '';
+
+    if (scanFrame) {
+      scanFrame.style.boxShadow = `0 0 0 9999px ${color}44, inset 0 0 0 5px ${color}`;
+    }
+    if (promptBox) {
+      promptBox.style.background = color;
+      promptBox.style.borderColor = '#fff';
+    }
+    if (promptSpan) {
+      promptSpan.style.color = '#000';
+      promptSpan.style.fontWeight = '900';
+      promptSpan.innerText = `${label} (${memberName}) • STAY STILL FOR PHOTO (2...)`;
+    }
+
+    await new Promise((r) => setTimeout(r, 600));
+    if (promptSpan) {
+      promptSpan.innerText = `${label} (${memberName}) • STAY STILL FOR PHOTO (1...)`;
+    }
+    await new Promise((r) => setTimeout(r, 600));
+
+    const photo = this.captureCameraSnapshot();
+
+    if (scanFrame) scanFrame.style.boxShadow = '';
+    if (promptBox) {
+      promptBox.style.background = '';
+      promptBox.style.borderColor = '';
+    }
+    if (promptSpan) {
+      promptSpan.style.color = '';
+      promptSpan.style.fontWeight = '';
+      promptSpan.innerText = origPrompt;
+    }
+
+    return photo;
   }
 
   async handleOfflineScan(cleanToken, timestamp, visitorPhotoBase64 = null) {
@@ -863,28 +936,38 @@ class TabletKioskApp {
     }
 
     if (status === 'visitor') {
-      this.resultCard.classList.add('status-paid');
-      banner.innerText = 'VISITOR PASS VERIFIED';
+      this.resultOverlay.className = 'result-overlay active theme-visitor';
+      this.resultCard.classList.add('status-visitor');
+      banner.innerText = 'VISITOR PASS • PHOTO CAPTURED';
+      this.cooldownBar.style.background = '#00B0FF';
       icon.innerHTML = `<svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>`;
       this.audio.playGranted();
     } else if (status === 'paid') {
+      this.resultOverlay.className = 'result-overlay active theme-paid';
       this.resultCard.classList.add('status-paid');
-      banner.innerText = 'ACCESS GRANTED';
+      banner.innerText = 'REGULAR MEMBER • ACCESS GRANTED';
+      this.cooldownBar.style.background = '#00E676';
       icon.innerHTML = `<svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
       this.audio.playGranted();
     } else if (status === 'due') {
+      this.resultOverlay.className = 'result-overlay active theme-due';
       this.resultCard.classList.add('status-due');
-      banner.innerText = 'PAYMENT DUE';
+      banner.innerText = data.dueAmount > 0 ? `UDHAAR DUE (Rs. ${Math.round(data.dueAmount)}) • PHOTO CAPTURED` : 'PAYMENT DUE • PHOTO CAPTURED';
+      this.cooldownBar.style.background = '#FF9100';
       icon.innerHTML = `<svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
       this.audio.playWarning();
     } else if (status === 'expired') {
+      this.resultOverlay.className = 'result-overlay active theme-expired';
       this.resultCard.classList.add('status-expired');
-      banner.innerText = 'MEMBERSHIP EXPIRED';
+      banner.innerText = 'MEMBERSHIP EXPIRED • PHOTO CAPTURED';
+      this.cooldownBar.style.background = '#FF1744';
       icon.innerHTML = `<svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`;
       this.audio.playWarning();
     } else {
+      this.resultOverlay.className = 'result-overlay active theme-expired';
       this.resultCard.classList.add('status-expired');
       banner.innerText = 'UNRECOGNIZED PASS';
+      this.cooldownBar.style.background = '#FF1744';
       icon.innerHTML = `<svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
       this.audio.playWarning();
     }

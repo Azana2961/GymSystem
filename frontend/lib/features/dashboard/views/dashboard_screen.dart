@@ -7,6 +7,7 @@ import 'widgets/kpi_card.dart';
 import 'widgets/live_feed.dart';
 import 'widgets/expiry_reminders.dart';
 import 'widgets/collect_payment_dialog.dart';
+import 'package:gym_system/core/constants/app_settings.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/core/services/api_service.dart';
 import 'package:gym_system/features/members/providers/members_provider.dart';
@@ -27,12 +28,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _membersProvider.addListener(_onMembersUpdated);
     _fetchStats();
     _statsPoller = Timer.periodic(const Duration(seconds: 4), (_) => _fetchStats());
   }
 
+  void _onMembersUpdated() {
+    if (mounted) {
+      setState(() {});
+      _fetchStats();
+    }
+  }
+
   @override
   void dispose() {
+    _membersProvider.removeListener(_onMembersUpdated);
     _statsPoller?.cancel();
     super.dispose();
   }
@@ -177,10 +187,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final checkins = _liveStats?['todayCheckins']?.toString() ?? '0';
-    final active = _liveStats?['activeMembers']?.toString() ?? _membersProvider.activeMembersCount.toString();
-    final due = _liveStats?['dueMembers']?.toString() ?? _membersProvider.pendingPaymentCount.toString();
-    final total = _liveStats?['totalMembers']?.toString() ?? _membersProvider.totalMembersCount.toString();
+    final todayCheckinsInt = (_liveStats?['todayCheckins'] as num?)?.toInt() ?? 0;
+    final yesterdayCheckinsInt = (_liveStats?['yesterdayCheckins'] as num?)?.toInt() ?? 0;
+    final checkinDiff = todayCheckinsInt - yesterdayCheckinsInt;
+    final checkinTrend = checkinDiff >= 0 ? '+$checkinDiff vs yesterday' : '$checkinDiff vs yesterday';
+
+    final activeInt = (_liveStats?['activeMembers'] as num?)?.toInt() ?? _membersProvider.activeMembersCount;
+    final dueInt = (_liveStats?['dueMembers'] as num?)?.toInt() ?? _membersProvider.pendingPaymentCount;
+    final expiredInt = (_liveStats?['expiredMembers'] as num?)?.toInt() ?? _membersProvider.expiredMembersCount;
+    final totalInt = (_liveStats?['totalMembers'] as num?)?.toInt() ?? _membersProvider.totalMembersCount;
+    final visitorInt = (_liveStats?['visitorMembers'] as num?)?.toInt() ??
+        _membersProvider.allMembers.where((m) => m.isVisitor).length;
+    final regularInt = (totalInt - visitorInt).clamp(0, totalInt);
+    final totalDueRs = (_liveStats?['totalDueAmount'] as num?)?.toDouble() ?? _membersProvider.totalDueAmount;
+    final activeRate = totalInt > 0 ? ((activeInt / totalInt) * 100).round() : 100;
+
+    final checkins = todayCheckinsInt.toString();
+    final active = activeInt.toString();
+    final due = (dueInt + expiredInt).toString();
+    final total = totalInt.toString();
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 24.0),
@@ -333,36 +358,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     value: checkins,
                     icon: Icons.login_rounded,
                     iconColor: AppColors.primary,
-                    trend: 'LIVE',
-                    isTrendUp: true,
-                    trendDescription: 'From tablet scans',
+                    trend: checkinTrend,
+                    isTrendUp: checkinDiff >= 0,
+                    trendDescription: 'Yesterday: $yesterdayCheckinsInt check-ins',
                   ),
                   KpiCard(
                     title: 'Active Members',
                     value: active,
                     icon: Icons.fitness_center_rounded,
                     iconColor: AppColors.primary,
-                    trend: 'SQLITE',
-                    isTrendUp: true,
-                    trendDescription: 'Paid & valid passes',
+                    trend: '$activeRate% Active',
+                    isTrendUp: activeRate >= 50,
+                    trendDescription: 'Paid & valid memberships',
                   ),
                   KpiCard(
                     title: 'Due / Expiring Soon',
                     value: due,
                     icon: Icons.warning_amber_rounded,
                     iconColor: AppColors.warning,
-                    trend: 'ALERTS',
-                    isTrendUp: false,
-                    trendDescription: 'WhatsApp candidates',
+                    trend: totalDueRs > 0
+                        ? 'Rs. ${AppSettings.formatAmount(totalDueRs)} Udhaar'
+                        : (dueInt + expiredInt > 0 ? '${dueInt + expiredInt} Actionable' : 'Rs. 0 Udhaar'),
+                    isTrendUp: dueInt == 0 && expiredInt == 0 && totalDueRs == 0,
+                    trendDescription: '$dueInt Udhaar • $expiredInt expired',
                   ),
                   KpiCard(
                     title: 'Total Roster',
                     value: total,
                     icon: Icons.people_alt_rounded,
                     iconColor: AppColors.success,
-                    trend: 'TOTAL',
+                    trend: '$regularInt Regular',
                     isTrendUp: true,
-                    trendDescription: 'Registered members',
+                    trendDescription: visitorInt > 0 ? '$visitorInt Visitor passes issued' : 'All registered members',
                   ),
                 ],
               );

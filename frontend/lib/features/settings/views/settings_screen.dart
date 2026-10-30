@@ -1,7 +1,5 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:gym_system/core/constants/app_settings.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/core/services/api_service.dart';
@@ -16,29 +14,23 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final AppSettings _settings = AppSettings.instance;
 
-  // Membership & Admission Fee
+  // Membership, Admission Fee & Payment Methods
   bool _enableJoiningFee = AppSettings.instance.enableJoiningFee;
   final TextEditingController _joiningFeeController = TextEditingController(
     text: AppSettings.instance.joiningFeeAmount.toInt().toString(),
   );
   List<MembershipPlanConfig> _plans = List<MembershipPlanConfig>.from(AppSettings.instance.plans);
+  List<String> _paymentMethods = List<String>.from(AppSettings.instance.paymentMethods);
+  final TextEditingController _newPaymentMethodCtrl = TextEditingController();
 
   // Automated WhatsApp & Notifications
   bool _sendExpiryAlert = AppSettings.instance.sendExpiryAlert;
   bool _sendPaymentReceipt = AppSettings.instance.sendPaymentReceipt;
   bool _sendWelcomeMessage = AppSettings.instance.sendWelcomeMessage;
-  final TextEditingController _testPhoneController = TextEditingController(text: '+92 300 1234567');
-  final TextEditingController _welcomeTemplateCtrl = TextEditingController(text: AppSettings.instance.templateWelcome);
   final TextEditingController _dueTemplateCtrl = TextEditingController(text: AppSettings.instance.templateDue);
   final TextEditingController _expiredTemplateCtrl = TextEditingController(text: AppSettings.instance.templateExpired);
-  final TextEditingController _receiptTemplateCtrl = TextEditingController(text: AppSettings.instance.templateReceipt);
   bool _savingTemplates = false;
   Map<String, dynamic>? _realWaStatus;
-
-  // Tablet Kiosk & Network Discovery
-  Map<String, dynamic>? _networkInfo;
-  List<Map<String, dynamic>> _tabletDevices = [];
-  bool _loadingTabletData = false;
 
   @override
   void initState() {
@@ -52,64 +44,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadSettings();
   }
 
-  void _loadSettings() {
+  void _syncLocalFromAppSettings() {
     _enableJoiningFee = _settings.enableJoiningFee;
     _joiningFeeController.text = _settings.joiningFeeAmount.toInt().toString();
     _plans = List<MembershipPlanConfig>.from(_settings.plans);
+    _paymentMethods = List<String>.from(_settings.paymentMethods);
     _sendExpiryAlert = _settings.sendExpiryAlert;
     _sendPaymentReceipt = _settings.sendPaymentReceipt;
     _sendWelcomeMessage = _settings.sendWelcomeMessage;
-    _welcomeTemplateCtrl.text = _settings.templateWelcome;
     _dueTemplateCtrl.text = _settings.templateDue;
     _expiredTemplateCtrl.text = _settings.templateExpired;
-    _receiptTemplateCtrl.text = _settings.templateReceipt;
-    _loadRealWaStatus();
-    _loadWaTemplatesFromServer();
-    _loadTabletData();
   }
 
-  Future<void> _loadWaTemplatesFromServer() async {
-    try {
-      final serverSettings = await ApiService.instance.getWhatsAppSettings();
-      if (serverSettings != null && mounted) {
-        setState(() {
-          if (serverSettings['template_welcome'] != null && serverSettings['template_welcome'].toString().isNotEmpty) {
-            _settings.templateWelcome = serverSettings['template_welcome'].toString();
-            _welcomeTemplateCtrl.text = _settings.templateWelcome;
-          }
-          if (serverSettings['template_due'] != null && serverSettings['template_due'].toString().isNotEmpty) {
-            _settings.templateDue = serverSettings['template_due'].toString();
-            _dueTemplateCtrl.text = _settings.templateDue;
-          }
-          if (serverSettings['template_expired'] != null && serverSettings['template_expired'].toString().isNotEmpty) {
-            _settings.templateExpired = serverSettings['template_expired'].toString();
-            _expiredTemplateCtrl.text = _settings.templateExpired;
-          }
-          if (serverSettings['template_receipt'] != null && serverSettings['template_receipt'].toString().isNotEmpty) {
-            _settings.templateReceipt = serverSettings['template_receipt'].toString();
-            _receiptTemplateCtrl.text = _settings.templateReceipt;
-          }
-        });
-      }
-    } catch (_) {}
+  Future<void> _loadSettings() async {
+    _syncLocalFromAppSettings();
+    _loadRealWaStatus();
+    await _settings.loadFromServer();
+    if (mounted) {
+      setState(() {
+        _syncLocalFromAppSettings();
+      });
+    }
   }
 
   Future<void> _saveWaTemplates() async {
     setState(() => _savingTemplates = true);
-    _settings.templateWelcome = _welcomeTemplateCtrl.text.trim();
     _settings.templateDue = _dueTemplateCtrl.text.trim();
     _settings.templateExpired = _expiredTemplateCtrl.text.trim();
-    _settings.templateReceipt = _receiptTemplateCtrl.text.trim();
 
-    final ok = await ApiService.instance.updateWhatsAppSettings({
-      'template_welcome': _settings.templateWelcome,
-      'template_due': _settings.templateDue,
-      'template_expired': _settings.templateExpired,
-      'template_receipt': _settings.templateReceipt,
-      'enable_welcome_msg': _sendWelcomeMessage.toString(),
-      'enable_expiry_alerts': _sendExpiryAlert.toString(),
-      'enable_payment_receipts': _sendPaymentReceipt.toString(),
-    });
+    final ok = await _settings.syncToServer();
 
     if (mounted) {
       setState(() => _savingTemplates = false);
@@ -129,10 +92,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _resetWaTemplates() {
     setState(() {
       _settings.resetTemplatesToDefault();
-      _welcomeTemplateCtrl.text = _settings.templateWelcome;
       _dueTemplateCtrl.text = _settings.templateDue;
       _expiredTemplateCtrl.text = _settings.templateExpired;
-      _receiptTemplateCtrl.text = _settings.templateReceipt;
     });
     _saveWaTemplates();
   }
@@ -144,63 +105,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _loadTabletData() async {
-    setState(() => _loadingTabletData = true);
-    try {
-      final info = await ApiService.instance.getNetworkInfo();
-      final devices = await ApiService.instance.getTabletDevices();
-      if (mounted) {
-        setState(() {
-          _networkInfo = info;
-          _tabletDevices = devices;
-          _loadingTabletData = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loadingTabletData = false);
-    }
-  }
-
-  Future<void> _triggerTabletSync() async {
-    final success = await ApiService.instance.triggerTabletSync();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success ? 'Signal sent! All tablets are now syncing the latest member roster.' : 'Could not reach server hub.'),
-          backgroundColor: success ? AppColors.success : AppColors.error,
-        ),
-      );
-    }
-  }
-
-  Future<void> _openTabletInBrowser() async {
-    final url = _networkInfo?['tabletUrl'] ?? 'http://localhost:5000/tablet';
-    try {
-      if (Platform.isWindows) {
-        await Process.run('cmd', ['/c', 'start', url]);
-      } else if (Platform.isMacOS) {
-        await Process.run('open', [url]);
-      } else if (Platform.isLinux) {
-        await Process.run('xdg-open', [url]);
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Open manually in tablet browser: $url')),
-        );
-      }
-    }
-  }
-
   @override
   void dispose() {
     _joiningFeeController.dispose();
-    _testPhoneController.dispose();
-    _welcomeTemplateCtrl.dispose();
+    _newPaymentMethodCtrl.dispose();
     _dueTemplateCtrl.dispose();
     _expiredTemplateCtrl.dispose();
-    _receiptTemplateCtrl.dispose();
     super.dispose();
+  }
+
+  // --- Payment Methods Management ---
+  void _addPaymentMethod() {
+    final name = _newPaymentMethodCtrl.text.trim();
+    if (name.isEmpty) return;
+    if (_paymentMethods.any((m) => m.toLowerCase() == name.toLowerCase())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('"$name" is already in your payment methods list.'),
+          backgroundColor: AppColors.warning,
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _paymentMethods.add(name);
+      _newPaymentMethodCtrl.clear();
+    });
+    _settings.paymentMethods = List<String>.from(_paymentMethods);
+    _settings.syncToServer();
+  }
+
+  void _removePaymentMethod(int index) {
+    if (_paymentMethods.length <= 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('At least one payment method must remain active.'),
+          backgroundColor: AppColors.warning,
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _paymentMethods.removeAt(index);
+    });
+    _settings.paymentMethods = List<String>.from(_paymentMethods);
+    _settings.syncToServer();
   }
 
   // --- Membership Plan Dialog (Add / Edit) ---
@@ -340,6 +289,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 }
               });
               _settings.plans = List<MembershipPlanConfig>.from(_plans);
+              _settings.syncToServer();
               Navigator.pop(ctx);
             },
             style: ElevatedButton.styleFrom(
@@ -382,46 +332,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _plans.removeAt(index);
               });
               _settings.plans = List<MembershipPlanConfig>.from(_plans);
+              _settings.syncToServer();
               Navigator.pop(ctx);
             },
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.error, foregroundColor: Colors.white),
             child: const Text('Delete'),
           ),
         ],
-      ),
-    );
-  }
-
-  Future<void> _sendTestWhatsApp() async {
-    final phone = _testPhoneController.text.trim();
-    if (phone.isEmpty) return;
-
-    final success = await ApiService.instance.sendWhatsAppTest(phone);
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: const Color(0xFF1B1B20),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: BorderSide(color: success ? AppColors.success : AppColors.warning, width: 1),
-        ),
-        content: Row(
-          children: [
-            Icon(success ? Icons.mark_chat_read_rounded : Icons.info_outline, color: success ? AppColors.success : AppColors.warning, size: 20),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                success
-                    ? '⚡ Test WhatsApp queued for $phone with random time delay!'
-                    : 'Backend connection pending on ${_settings.backendUrl}. Check server console.',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-              ),
-            ),
-          ],
-        ),
-        duration: const Duration(seconds: 4),
       ),
     );
   }
@@ -554,13 +471,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-
-
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Top Header matching Dashboard style (clean without the big Save button)
+        // Top Header matching Dashboard style
         Padding(
           padding: const EdgeInsets.fromLTRB(28.0, 24.0, 28.0, 0),
           child: Container(
@@ -604,7 +519,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         SizedBox(height: 2),
                         Text(
-                          'Manage membership rates, tiers, and automated WhatsApp alerts',
+                          'Manage membership rates, payment methods, and automated WhatsApp alerts',
                           style: TextStyle(
                             fontSize: 12,
                             color: AppColors.textMuted,
@@ -628,7 +543,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Icon(Icons.check_circle_outline_rounded, color: AppColors.success, size: 14),
                       SizedBox(width: 6),
                       Text(
-                        'Auto-Saved',
+                        'Live & Auto-Saved',
                         style: TextStyle(
                           color: AppColors.textSecondary,
                           fontSize: 12,
@@ -650,11 +565,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 1. Membership Plans & Admission Fee Card
+                // 1. Membership Plans, Admission Fee & Payment Methods Card
                 _buildSectionCard(
                   icon: Icons.card_membership_rounded,
-                  title: 'Membership Plans & Admission Fee',
-                  subtitle: 'Set what you charge for new registrations and monthly gym access',
+                  title: 'Membership Plans, Admission Fee & Payment Methods',
+                  subtitle: 'Set what you charge for new registrations, monthly gym access, and accepted payment options',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -670,11 +585,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           children: [
                             Row(
                               children: [
-                                Expanded(
+                                const Expanded(
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      const Text(
+                                      Text(
                                         'Charge Admission / Registration Fee',
                                         style: TextStyle(
                                           fontWeight: FontWeight.bold,
@@ -682,9 +597,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                           color: AppColors.textPrimary,
                                         ),
                                       ),
-                                      const SizedBox(height: 4),
-                                      const Text(
-                                        'One-time joining fee automatically added to first-time member registrations.',
+                                      SizedBox(height: 4),
+                                      Text(
+                                        'One-time joining fee automatically added to first-time member registrations (Visitor Pass is always Free).',
                                         style: TextStyle(
                                           color: AppColors.textMuted,
                                           fontSize: 12,
@@ -700,6 +615,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   onChanged: (v) {
                                     setState(() => _enableJoiningFee = v);
                                     _settings.enableJoiningFee = v;
+                                    _settings.syncToServer();
                                   },
                                 ),
                               ],
@@ -708,7 +624,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               const SizedBox(height: 14),
                               const Divider(color: AppColors.border, height: 1),
                               const SizedBox(height: 14),
-                              Row(
+                              Wrap(
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                spacing: 12,
+                                runSpacing: 10,
                                 children: [
                                   const Text(
                                     'Fee Amount:',
@@ -718,7 +637,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       fontSize: 13,
                                     ),
                                   ),
-                                  const SizedBox(width: 14),
                                   SizedBox(
                                     width: 160,
                                     child: TextField(
@@ -735,15 +653,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       onChanged: (val) {
                                         final fee = double.tryParse(val.replaceAll(',', ''));
                                         if (fee != null && fee >= 0) {
+                                          setState(() {});
                                           _settings.joiningFeeAmount = fee;
+                                          _settings.syncToServer();
                                         }
                                       },
                                     ),
                                   ),
-                                  const SizedBox(width: 12),
                                   // Quick amount buttons
                                   Wrap(
                                     spacing: 8,
+                                    runSpacing: 8,
                                     children: [3000, 5000, 7500, 10000].map((preset) {
                                       final isSelected = _joiningFeeController.text == preset.toString();
                                       return InkWell(
@@ -752,6 +672,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                             _joiningFeeController.text = preset.toString();
                                           });
                                           _settings.joiningFeeAmount = preset.toDouble();
+                                          _settings.syncToServer();
                                         },
                                         borderRadius: BorderRadius.circular(6),
                                         child: Container(
@@ -913,6 +834,131 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           );
                         },
                       ),
+
+                      const SizedBox(height: 22),
+                      const Divider(color: AppColors.border, height: 1),
+                      const SizedBox(height: 20),
+
+                      // Payment Methods Section (dynamically shown in Collect Payment & New Registration)
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceLight,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(Icons.account_balance_wallet_rounded, color: AppColors.primary, size: 18),
+                                          SizedBox(width: 8),
+                                          Text(
+                                            'Accepted Payment Methods',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.bold,
+                                              color: AppColors.textPrimary,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      SizedBox(height: 4),
+                                      Text(
+                                        'These payment options appear dynamically when registering a new member or collecting fees.',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.textMuted,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      width: 200,
+                                      child: TextField(
+                                        controller: _newPaymentMethodCtrl,
+                                        style: const TextStyle(fontSize: 13),
+                                        onSubmitted: (_) => _addPaymentMethod(),
+                                        decoration: const InputDecoration(
+                                          hintText: 'e.g. SadaPay, NayaPay...',
+                                          border: OutlineInputBorder(),
+                                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                                          isDense: true,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    ElevatedButton.icon(
+                                      onPressed: _addPaymentMethod,
+                                      icon: const Icon(Icons.add_rounded, size: 16),
+                                      label: const Text('Add Method', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppColors.primary,
+                                        foregroundColor: Colors.black,
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: List.generate(_paymentMethods.length, (idx) {
+                                final method = _paymentMethods[idx];
+                                return Container(
+                                  padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.background,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: AppColors.primary.withValues(alpha: 0.45)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.payments_outlined, size: 15, color: AppColors.primary),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        method,
+                                        style: const TextStyle(
+                                          color: AppColors.textPrimary,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 12.5,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      InkWell(
+                                        onTap: () => _removePaymentMethod(idx),
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: const Padding(
+                                          padding: EdgeInsets.all(2.0),
+                                          child: Icon(Icons.close_rounded, size: 15, color: AppColors.textMuted),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -975,7 +1021,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   const SizedBox(height: 2),
                                   Text(
                                     (_realWaStatus?['isConnected'] == true)
-                                        ? 'All auto-reminders and receipts will send from your linked WhatsApp number.'
+                                        ? 'All auto-reminders and passes will send from your linked WhatsApp number.'
                                         : 'Scan the pairing QR code with your phone to start sending real messages.',
                                     style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
                                   ),
@@ -1009,38 +1055,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _buildToggleRow(
                         icon: Icons.schedule_send_rounded,
                         title: 'Send Membership Expiry Reminders',
-                        description: 'Automatically alert members via WhatsApp 3 days before their plan expires and on the day of expiry.',
+                        description: 'Enable WhatsApp expiry reminders for members whose plans are expiring soon or overdue.',
                         value: _sendExpiryAlert,
                         onChanged: (v) {
                           setState(() => _sendExpiryAlert = v);
                           _settings.sendExpiryAlert = v;
+                          _settings.syncToServer();
                         },
                       ),
                       const Divider(color: AppColors.border, height: 24),
                       _buildToggleRow(
                         icon: Icons.receipt_long_rounded,
                         title: 'Send Digital Payment Receipts',
-                        description: 'Instantly dispatch a digital invoice & thank you message to member’s WhatsApp right after fee collection.',
+                        description: 'Automatically dispatch the updated Digital Membership Pass image via WhatsApp right after fee collection.',
                         value: _sendPaymentReceipt,
                         onChanged: (v) {
                           setState(() => _sendPaymentReceipt = v);
                           _settings.sendPaymentReceipt = v;
+                          _settings.syncToServer();
                         },
                       ),
                       const Divider(color: AppColors.border, height: 24),
                       _buildToggleRow(
                         icon: Icons.celebration_rounded,
                         title: 'Send Welcome Message & Digital Pass on Registration',
-                        description: 'Send full scannable Digital Membership Pass image & welcome caption immediately upon new member enrollment.',
+                        description: 'Automatically send the scannable Digital Membership Pass image via WhatsApp immediately upon new member enrollment.',
                         value: _sendWelcomeMessage,
                         onChanged: (v) {
                           setState(() => _sendWelcomeMessage = v);
                           _settings.sendWelcomeMessage = v;
+                          _settings.syncToServer();
                         },
                       ),
                       const Divider(color: AppColors.border, height: 28),
 
-                      // Custom Message Templates Editor
+                      // Custom Message Templates Editor (Expiry & Due Reminders)
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -1048,7 +1097,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Customize Automated Message Templates',
+                                'Customize Automated Reminder Templates',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 14,
@@ -1057,7 +1106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                               SizedBox(height: 2),
                               Text(
-                                'Available placeholders: {name}, {plan}, {expiry_date}, {id}, {amount}, {method}, {gym_name}',
+                                'Available placeholders: {name}, {plan}, {expiry_date}, {id}, {gym_name}',
                                 style: TextStyle(fontSize: 11, color: AppColors.primary),
                               ),
                             ],
@@ -1100,337 +1149,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         children: [
                           Expanded(
                             child: _buildTemplateField(
-                              icon: Icons.badge_rounded,
-                              title: '1. Welcome & Digital Pass Caption (New Member)',
-                              hint: 'Sent with the full QR Digital Membership Pass image',
-                              controller: _welcomeTemplateCtrl,
+                              icon: Icons.notifications_active_rounded,
+                              title: '1. Upcoming Expiry / Due Reminder',
+                              hint: 'Sent when membership is expiring within 7 days',
+                              controller: _dueTemplateCtrl,
                             ),
                           ),
                           const SizedBox(width: 14),
                           Expanded(
                             child: _buildTemplateField(
-                              icon: Icons.notifications_active_rounded,
-                              title: '2. Upcoming Expiry / Due Reminder',
-                              hint: 'Sent when membership is expiring within 5 days',
-                              controller: _dueTemplateCtrl,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: _buildTemplateField(
                               icon: Icons.warning_amber_rounded,
-                              title: '3. Expired Membership Alert',
+                              title: '2. Expired Membership Alert',
                               hint: 'Sent when membership has already expired',
                               controller: _expiredTemplateCtrl,
                             ),
                           ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: _buildTemplateField(
-                              icon: Icons.receipt_long_rounded,
-                              title: '4. Payment / Renewal Receipt',
-                              hint: 'Sent after collecting fee or renewing membership',
-                              controller: _receiptTemplateCtrl,
-                            ),
-                          ),
                         ],
-                      ),
-                      const SizedBox(height: 18),
-
-                      // Test WhatsApp Dispatcher
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceLight,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.send_rounded, color: AppColors.primary, size: 18),
-                            const SizedBox(width: 10),
-                            const Text(
-                              'Test WhatsApp Notification:',
-                              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.textSecondary),
-                            ),
-                            const SizedBox(width: 14),
-                            SizedBox(
-                              width: 180,
-                              child: TextField(
-                                controller: _testPhoneController,
-                                style: const TextStyle(fontSize: 13),
-                                decoration: const InputDecoration(
-                                  hintText: '+92 300 1234567',
-                                  border: OutlineInputBorder(),
-                                  contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                  isDense: true,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            ElevatedButton(
-                              onPressed: _sendTestWhatsApp,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.primary.withValues(alpha: 0.15),
-                                foregroundColor: AppColors.primary,
-                                elevation: 0,
-                                side: const BorderSide(color: AppColors.primary, width: 0.8),
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              ),
-                              child: const Text('Send Test Message', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                            ),
-                          ],
-                        ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
-
-                // 3. Tablet Kiosk & Camera Scanner Hub Card
-                _buildSectionCard(
-                  icon: Icons.tablet_mac_rounded,
-                  title: 'Tablet Kiosk & Camera QR Scanner Hub',
-                  subtitle: 'Connect entrance tablets for automated attendance check-ins with real-time offline sync',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Network Address & Direct URL Banner
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceLight,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Left: Setup QR Code
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: (_networkInfo != null && _networkInfo!['tabletUrl'] != null)
-                                  ? QrImageView(
-                                      data: jsonEncode({
-                                        'serverUrl': _networkInfo!['baseUrl'],
-                                        'tabletUrl': _networkInfo!['tabletUrl'],
-                                        'wsUrl': _networkInfo!['wsUrl'],
-                                        'primaryIp': _networkInfo!['primaryIp'],
-                                        'gymName': 'Titan Gym',
-                                      }),
-                                      version: QrVersions.auto,
-                                      size: 150,
-                                      backgroundColor: Colors.white,
-                                    )
-                                  : const SizedBox(
-                                      width: 150,
-                                      height: 150,
-                                      child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                                    ),
-                            ),
-                            const SizedBox(width: 20),
-
-                            // Right: Setup Instructions & Launch Actions
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: AppColors.primary.withValues(alpha: 0.15),
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
-                                        ),
-                                        child: Text(
-                                          'Tablet Kiosk URL: ${_networkInfo?['tabletUrl'] ?? 'http://localhost:5000/tablet'}',
-                                          style: const TextStyle(
-                                            color: AppColors.primary,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 10),
-                                  const Text(
-                                    'How to connect any Tablet (iPad, Android, Samsung, Fire HD):',
-                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  const Text(
-                                    '1. Connect your tablet and this PC to the SAME Wi-Fi or hotspot.\n'
-                                    '2. On the tablet, point the camera at this QR code or open the link above in Chrome/Safari.\n'
-                                    '3. Once open, tap "Fullscreen" or "Add to Home Screen" to run as a dedicated kiosk!\n'
-                                    '4. New members added on this PC are instantly pushed to the tablet for offline scanning.',
-                                    style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.45),
-                                  ),
-                                  const SizedBox(height: 14),
-
-                                  // Quick Action Buttons
-                                  Wrap(
-                                    spacing: 10,
-                                    runSpacing: 10,
-                                    children: [
-                                      ElevatedButton.icon(
-                                        onPressed: _openTabletInBrowser,
-                                        icon: const Icon(Icons.open_in_browser_rounded, size: 16),
-                                        label: const Text('Launch Kiosk in Browser'),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: AppColors.primary,
-                                          foregroundColor: Colors.black,
-                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                        ),
-                                      ),
-                                      OutlinedButton.icon(
-                                        onPressed: _triggerTabletSync,
-                                        icon: const Icon(Icons.sync_rounded, size: 16),
-                                        label: const Text('Push Members to Tablets Now'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: AppColors.primary,
-                                          side: const BorderSide(color: AppColors.primary, width: 0.8),
-                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                        ),
-                                      ),
-                                      IconButton(
-                                        onPressed: _loadingTabletData ? null : _loadTabletData,
-                                        icon: _loadingTabletData
-                                            ? const SizedBox(
-                                                width: 16,
-                                                height: 16,
-                                                child: CircularProgressIndicator(strokeWidth: 2),
-                                              )
-                                            : const Icon(Icons.refresh_rounded, size: 18),
-                                        tooltip: 'Refresh connected tablets',
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-
-                      // Connected Tablets Registry
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            'Connected Tablet Devices (Live Registry)',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.textPrimary),
-                          ),
-                          Text(
-                            '${_tabletDevices.length} Active Kiosk${_tabletDevices.length == 1 ? '' : 's'}',
-                            style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-
-                      if (_tabletDevices.isEmpty)
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: AppColors.surfaceLight,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: const Center(
-                            child: Text(
-                              'No tablet kiosks connected yet. Open the link or scan the QR code to pair your first tablet.',
-                              style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-                            ),
-                          ),
-                        )
-                      else
-                        ListView.separated(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _tabletDevices.length,
-                          separatorBuilder: (ctx, i) => const SizedBox(height: 8),
-                          itemBuilder: (ctx, idx) {
-                            final dev = _tabletDevices[idx];
-                            final num? battery = dev['battery_level'] is num ? (dev['battery_level'] as num) : null;
-                            return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: AppColors.surfaceLight,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: AppColors.border),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.tablet_android_rounded, color: AppColors.primary, size: 22),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          dev['device_name'] ?? 'Tablet Kiosk',
-                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          'IP: ${dev['ip_address'] ?? 'Local'} • Version: ${dev['app_version'] ?? '2.0.0'} • Total Scans: ${dev['total_scans'] ?? 0}',
-                                          style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  if (battery != null) ...[
-                                    Icon(
-                                      battery > 20 ? Icons.battery_charging_full_rounded : Icons.battery_alert_rounded,
-                                      color: battery > 20 ? AppColors.success : AppColors.warning,
-                                      size: 16,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '${battery.toInt()}%',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: battery > 20 ? AppColors.success : AppColors.warning,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                  ],
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.success.withValues(alpha: 0.15),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: const Text(
-                                      'ONLINE',
-                                      style: TextStyle(color: AppColors.success, fontSize: 10, fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
                 const SizedBox(height: 40),
               ],
             ),

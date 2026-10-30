@@ -34,7 +34,13 @@ class ApiService {
           return (json['members'] as List).map((m) {
             final expiry = DateTime.tryParse(m['expiry_date'] ?? '') ??
                 DateTime.now().add(const Duration(days: 30));
-            final isDue = m['status'] == 'due';
+            final dueAmt = (m['due_amount'] is num)
+                ? (m['due_amount'] as num).toDouble()
+                : (double.tryParse(m['due_amount']?.toString() ?? '0') ?? 0.0);
+            final paidAmt = (m['paid_amount'] is num)
+                ? (m['paid_amount'] as num).toDouble()
+                : (double.tryParse(m['paid_amount']?.toString() ?? '0') ?? 0.0);
+            final isDue = m['status'] == 'due' || dueAmt > 0;
             final isExpired = m['status'] == 'expired' || expiry.isBefore(DateTime.now());
 
             return MemberModel(
@@ -43,6 +49,8 @@ class ApiService {
               plan: m['plan'] ?? 'Basic Plan',
               expiryDate: expiry,
               isPaymentPending: isDue,
+              dueAmount: dueAmt,
+              paidAmount: paidAmt,
               phone: m['phone'],
               email: m['email'],
               gender: m['gender'],
@@ -73,7 +81,7 @@ class ApiService {
 
       final status = member.isVisitor
           ? 'visitor'
-          : (member.isPaymentPending
+          : ((member.isPaymentPending || member.dueAmount > 0)
               ? 'due'
               : (member.isExpired ? 'expired' : 'paid'));
 
@@ -88,6 +96,8 @@ class ApiService {
         'status': status,
         'gender': member.gender,
         'notes': member.notes,
+        'due_amount': member.dueAmount,
+        'paid_amount': member.paidAmount,
         'send_welcome': sendWelcome,
       });
 
@@ -119,7 +129,7 @@ class ApiService {
 
       final status = member.isVisitor
           ? 'visitor'
-          : (member.isPaymentPending
+          : ((member.isPaymentPending || member.dueAmount > 0)
               ? 'due'
               : (member.isExpired ? 'expired' : 'paid'));
 
@@ -132,8 +142,9 @@ class ApiService {
         'status': status,
         'gender': member.gender,
         'notes': member.notes,
+        'due_amount': member.dueAmount,
+        'paid_amount': paidAmount?.toInt() ?? member.paidAmount.toInt(),
         'send_receipt': sendReceipt,
-        'paid_amount': paidAmount?.toInt().toString(),
         'payment_method': paymentMethod,
       });
 
@@ -261,7 +272,7 @@ class ApiService {
         'phone': phone,
         'text': text,
         'type': type,
-        if (imageBase64 != null) 'image_base64': imageBase64,
+        'image_base64': ?imageBase64,
       }));
       final response = await request.close();
       return response.statusCode == 200;

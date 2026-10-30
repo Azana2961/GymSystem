@@ -106,7 +106,9 @@ class WhatsAppService {
   }
 
   getSettings() {
+    const allStored = db.getAllSettings();
     return {
+      ...allStored,
       min_delay_sec: parseInt(db.getSetting('min_delay_sec', '5'), 10),
       max_delay_sec: parseInt(db.getSetting('max_delay_sec', '14'), 10),
       burst_batch_size: parseInt(db.getSetting('burst_batch_size', '5'), 10),
@@ -122,6 +124,11 @@ class WhatsAppService {
       template_due: db.getSetting('template_due', ''),
       template_expired: db.getSetting('template_expired', ''),
       template_receipt: db.getSetting('template_receipt', ''),
+      enable_welcome_msg: db.getSetting('enable_welcome_msg', 'true'),
+      enable_expiry_alerts: db.getSetting('enable_expiry_alerts', 'true'),
+      enable_payment_receipts: db.getSetting('enable_payment_receipts', 'true'),
+      enable_joining_fee: db.getSetting('enable_joining_fee', 'true'),
+      joining_fee_amount: db.getSetting('joining_fee_amount', '5000'),
     };
   }
 

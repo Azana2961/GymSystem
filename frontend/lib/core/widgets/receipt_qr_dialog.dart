@@ -17,6 +17,7 @@ class ReceiptQrDialog extends StatefulWidget {
   final double totalPaid;
   final String paymentMethod;
   final bool isNewRegistration;
+  final bool isPaymentCollection;
   final String? receiptNumber;
   final DateTime? transactionTime;
 
@@ -29,6 +30,7 @@ class ReceiptQrDialog extends StatefulWidget {
     required this.totalPaid,
     required this.paymentMethod,
     this.isNewRegistration = false,
+    this.isPaymentCollection = false,
     this.receiptNumber,
     this.transactionTime,
   });
@@ -49,6 +51,7 @@ class _ReceiptQrDialogState extends State<ReceiptQrDialog> {
   double get totalPaid => widget.totalPaid;
   String get paymentMethod => widget.paymentMethod;
   bool get isNewRegistration => widget.isNewRegistration;
+  bool get isPaymentCollection => widget.isPaymentCollection;
   String? get receiptNumber => widget.receiptNumber;
   DateTime? get transactionTime => widget.transactionTime;
 
@@ -56,8 +59,9 @@ class _ReceiptQrDialogState extends State<ReceiptQrDialog> {
   void initState() {
     super.initState();
     // Auto-dispatch the full Pass Card image on new member registration or payment collection
+    // based dynamically on the active toggles in Settings
     final shouldAutoSend = (isNewRegistration && AppSettings.instance.sendWelcomeMessage) ||
-        (!isNewRegistration && AppSettings.instance.sendPaymentReceipt);
+        (isPaymentCollection && AppSettings.instance.sendPaymentReceipt);
     if (shouldAutoSend && (member.phone?.trim().isNotEmpty ?? false)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Future.delayed(const Duration(milliseconds: 500), () {
@@ -367,14 +371,20 @@ QR Check-in Token: ${member.id}
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                                           decoration: BoxDecoration(
-                                            color: AppColors.success.withValues(alpha: 0.15),
+                                            color: (member.dueAmount > 0 ? AppColors.warning : AppColors.success)
+                                                .withValues(alpha: 0.15),
                                             borderRadius: BorderRadius.circular(6),
-                                            border: Border.all(color: AppColors.success.withValues(alpha: 0.4)),
+                                            border: Border.all(
+                                              color: (member.dueAmount > 0 ? AppColors.warning : AppColors.success)
+                                                  .withValues(alpha: 0.4),
+                                            ),
                                           ),
-                                          child: const Text(
-                                            'ACTIVE',
+                                          child: Text(
+                                            member.dueAmount > 0
+                                                ? 'DUE: Rs. ${AppSettings.formatAmount(member.dueAmount)}'
+                                                : 'ACTIVE',
                                             style: TextStyle(
-                                              color: AppColors.success,
+                                              color: member.dueAmount > 0 ? AppColors.warning : AppColors.success,
                                               fontWeight: FontWeight.bold,
                                               fontSize: 9.5,
                                               letterSpacing: 0.5,
@@ -502,7 +512,18 @@ QR Check-in Token: ${member.id}
                               Container(width: 1, height: 28, color: AppColors.border),
                               _buildPassStat('EXPIRES ON', _formatDate(member.expiryDate), true),
                               Container(width: 1, height: 28, color: AppColors.border),
-                              _buildPassStat('FEE PAID', 'Rs. ${AppSettings.formatAmount(totalPaid)}', false, subText: paymentMethod),
+                              _buildPassStat(
+                                'FEE PAID',
+                                (member.isVisitor && totalPaid == 0)
+                                    ? 'FREE'
+                                    : 'Rs. ${AppSettings.formatAmount(totalPaid)}',
+                                false,
+                                subText: (member.isVisitor && totalPaid == 0)
+                                    ? 'Guest Pass'
+                                    : (member.dueAmount > 0
+                                          ? 'Udhaar: Rs. ${AppSettings.formatAmount(member.dueAmount)}'
+                                          : paymentMethod),
+                              ),
                             ],
                           ),
                         ),

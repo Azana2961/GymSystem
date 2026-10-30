@@ -25,15 +25,49 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
   late AnimationController _laserController;
 
   bool _isProcessingScan = false;
+  bool _isCapturingPhoto = false;
+  int _photoCountdown = 2;
+  String? _activeScanStatus; // 'paid', 'visitor', 'due', 'expired'
+  String? _activeScanName;
   ScanResultInfo? _activeResult;
   Timer? _cooldownTimer;
 
-  // Visual Palette
+  // Status Color Palette:
+  // Regular (Active): Green | Visitor: Blue | Due (Udhaar): Orange | Expired: Red
   static const Color _bgDark = Color(0xFF07090C);
-  static const Color _primaryNeon = Color(0xFF00E676);
-  static const Color _cyanNeon = Color(0xFF00E5FF);
-  static const Color _warningNeon = Color(0xFFFFB300);
-  static const Color _dangerNeon = Color(0xFFFF1744);
+  static const Color _regularGreen = Color(0xFF00E676);
+  static const Color _visitorBlue = Color(0xFF00B0FF);
+  static const Color _dueOrange = Color(0xFFFF9100);
+  static const Color _expiredRed = Color(0xFFFF1744);
+
+  Color _colorForStatus(String? status) {
+    switch (status) {
+      case 'expired':
+      case 'unrecognized':
+        return _expiredRed;
+      case 'due':
+        return _dueOrange;
+      case 'visitor':
+        return _visitorBlue;
+      case 'paid':
+      default:
+        return _regularGreen;
+    }
+  }
+
+  String _labelForStatus(String? status) {
+    switch (status) {
+      case 'expired':
+        return 'MEMBERSHIP EXPIRED';
+      case 'due':
+        return 'UDHAAR / PAYMENT DUE';
+      case 'visitor':
+        return 'VISITOR PASS';
+      case 'paid':
+      default:
+        return 'REGULAR MEMBER • ACTIVE';
+    }
+  }
 
   @override
   void initState() {
@@ -68,10 +102,11 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
 
   Future<Uint8List?> _captureCameraFallback() async {
     try {
+      await WidgetsBinding.instance.endOfFrame;
       final boundary =
           _cameraRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) return null;
-      final ui.Image image = await boundary.toImage(pixelRatio: 1.0);
+      final ui.Image image = await boundary.toImage(pixelRatio: 1.2);
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       return byteData?.buffer.asUint8List();
     } catch (_) {
@@ -84,24 +119,56 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
     final clean = rawValue.trim();
     if (clean.isEmpty) return;
 
-    setState(() => _isProcessingScan = true);
+    final previewStatus = _sync.previewMemberStatus(clean);
+    final cachedMember = _sync.findMember(clean);
+    final needsPhoto =
+        previewStatus == 'visitor' || previewStatus == 'due' || previewStatus == 'expired';
 
-    // If this QR belongs to a Visitor Pass, capture the visitor's photo from camera
-    Uint8List? visitorPhotoBytes;
-    if (_sync.isVisitorToken(clean)) {
-      visitorPhotoBytes = capturedImage ?? await _captureCameraFallback();
+    setState(() {
+      _isProcessingScan = true;
+      _activeScanStatus = previewStatus;
+      _activeScanName = cachedMember?.name ??
+          (previewStatus == 'visitor' ? 'Visitor Pass' : clean);
+    });
+
+    Uint8List? verificationPhotoBytes;
+
+    // For Due (Orange), Visitor (Blue), and Expired (Red):
+    // Show the status color screen & ask user to "Stay Still" while taking verification photo!
+    if (needsPhoto) {
+      setState(() {
+        _isCapturingPhoto = true;
+        _photoCountdown = 2;
+      });
+      await Future.delayed(const Duration(milliseconds: 650));
+      if (!mounted) return;
+      setState(() => _photoCountdown = 1);
+      await Future.delayed(const Duration(milliseconds: 650));
+      if (!mounted) return;
+
+      // Capture live frame after user stays still
+      verificationPhotoBytes = await _captureCameraFallback() ?? capturedImage;
+      if (mounted) {
+        setState(() => _isCapturingPhoto = false);
+      }
     }
 
-    final result = await _sync.processScan(clean, visitorPhotoBytes: visitorPhotoBytes);
+    final result = await _sync.processScan(clean, visitorPhotoBytes: verificationPhotoBytes);
 
     if (mounted) {
-      setState(() => _activeResult = result);
+      setState(() {
+        _activeScanStatus = result.status;
+        _activeResult = result;
+      });
 
       _cooldownTimer?.cancel();
-      _cooldownTimer = Timer(const Duration(milliseconds: 2800), () {
+      _cooldownTimer = Timer(const Duration(milliseconds: 3000), () {
         if (mounted) {
           setState(() {
             _activeResult = null;
+            _activeScanStatus = null;
+            _activeScanName = null;
+            _isCapturingPhoto = false;
             _isProcessingScan = false;
           });
         }
@@ -113,6 +180,9 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
     _cooldownTimer?.cancel();
     setState(() {
       _activeResult = null;
+      _activeScanStatus = null;
+      _activeScanName = null;
+      _isCapturingPhoto = false;
       _isProcessingScan = false;
     });
   }
@@ -223,7 +293,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                             ),
                             prefixIcon: const Icon(
                               Icons.search_rounded,
-                              color: _cyanNeon,
+                              color: _visitorBlue,
                               size: 20,
                             ),
                             hintText: 'Search name or enter QR token (e.g. GYM-... / VIS-...)',
@@ -241,7 +311,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                           }
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: _primaryNeon,
+                          backgroundColor: _regularGreen,
                           foregroundColor: Colors.black,
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
                           shape: RoundedRectangleBorder(
@@ -277,19 +347,21 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                                 const Divider(color: Colors.white10, height: 1),
                             itemBuilder: (context, index) {
                               final MemberItem m = filtered[index];
-                              final isVis = m.status == 'visitor' ||
-                                  m.qrToken.toUpperCase().startsWith('VIS-') ||
-                                  (m.plan?.toLowerCase().contains('visitor') ?? false);
+                              final isVis = m.isVisitor;
                               final Color badgeColor = isVis
-                                  ? _cyanNeon
+                                  ? _visitorBlue
                                   : (m.isExpired
-                                      ? _dangerNeon
-                                      : (m.isDue ? _warningNeon : _primaryNeon));
+                                      ? _expiredRed
+                                      : (m.isDue ? _dueOrange : _regularGreen));
                               final String badgeLabel = isVis
                                   ? 'VISITOR'
                                   : (m.isExpired
                                       ? 'EXPIRED'
-                                      : (m.isDue ? 'DUE' : 'ACTIVE'));
+                                      : (m.isDue
+                                          ? (m.dueAmount > 0
+                                              ? 'DUE Rs.${m.dueAmount.toInt()}'
+                                              : 'DUE')
+                                          : 'ACTIVE'));
 
                               return ListTile(
                                 contentPadding:
@@ -460,7 +532,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                       },
                       icon: const Icon(Icons.network_check_rounded, size: 16),
                       label: const Text('Test Ping'),
-                      style: OutlinedButton.styleFrom(foregroundColor: _cyanNeon),
+                      style: OutlinedButton.styleFrom(foregroundColor: _visitorBlue),
                     ),
                     OutlinedButton.icon(
                       onPressed: () async {
@@ -475,7 +547,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                       },
                       icon: const Icon(Icons.sync_rounded, size: 16),
                       label: Text('Sync Roster (${_sync.cachedMembersCount})'),
-                      style: OutlinedButton.styleFrom(foregroundColor: _primaryNeon),
+                      style: OutlinedButton.styleFrom(foregroundColor: _regularGreen),
                     ),
                     if (_sync.pendingScansCount > 0)
                       OutlinedButton.icon(
@@ -488,14 +560,14 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                               content: Text(
                                 flushed > 0
                                     ? 'Uploaded $flushed queued offline scans to PC!'
-                                    : 'Still offline — ${ _sync.pendingScansCount} scans safely queued.',
+                                    : 'Still offline — ${_sync.pendingScansCount} scans safely queued.',
                               ),
                             ),
                           );
                         },
                         icon: const Icon(Icons.cloud_upload_rounded, size: 16),
                         label: Text('Upload Queued (${_sync.pendingScansCount})'),
-                        style: OutlinedButton.styleFrom(foregroundColor: _warningNeon),
+                        style: OutlinedButton.styleFrom(foregroundColor: _dueOrange),
                       ),
                   ],
                 ),
@@ -514,7 +586,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                     style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _primaryNeon,
+                    backgroundColor: _regularGreen,
                     minimumSize: const Size.fromHeight(48),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
@@ -529,6 +601,8 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
+    final activeThemeColor = _colorForStatus(_activeScanStatus);
+
     return Scaffold(
       backgroundColor: _bgDark,
       resizeToAvoidBottomInset: false,
@@ -559,7 +633,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                           children: [
                             const Icon(
                               Icons.videocam_off_rounded,
-                              color: _dangerNeon,
+                              color: _expiredRed,
                               size: 48,
                             ),
                             const SizedBox(height: 12),
@@ -585,8 +659,8 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                               icon: const Icon(Icons.list_alt_rounded, size: 16),
                               label: const Text('Open Manual Check-In & Roster'),
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: _primaryNeon,
-                                side: const BorderSide(color: _primaryNeon),
+                                foregroundColor: _regularGreen,
+                                side: const BorderSide(color: _regularGreen),
                               ),
                             ),
                           ],
@@ -596,6 +670,21 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                   ),
                 ),
               ),
+
+              // 1b. Status-Colored Fullscreen Frame Glow when scanning (Red/Orange/Blue/Green)
+              if (_activeScanStatus != null)
+                IgnorePointer(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    decoration: BoxDecoration(
+                      color: activeThemeColor.withValues(alpha: _isCapturingPhoto ? 0.24 : 0.16),
+                      border: Border.all(
+                        color: activeThemeColor,
+                        width: isCompact ? 8 : 12,
+                      ),
+                    ),
+                  ),
+                ),
 
               // 2. Adaptive HUD Layout (Top Bar + Responsive Reticle + Bottom Controls)
               SafeArea(
@@ -613,7 +702,6 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                           final availH = middleConstraints.maxHeight;
                           final isShortLandscape = availH < 250 && availW > availH;
 
-                          // Dynamically scale reticle to fit any screen without clipping
                           final double reticleSize = isShortLandscape
                               ? (availH * 0.78).clamp(110.0, 220.0)
                               : math
@@ -624,44 +712,123 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                             width: reticleSize,
                             height: reticleSize,
                             child: Stack(
+                              alignment: Alignment.center,
                               children: [
                                 CustomPaint(
                                   size: Size(reticleSize, reticleSize),
-                                  painter: _ReticlePainter(color: _primaryNeon),
+                                  painter: _ReticlePainter(color: activeThemeColor),
                                 ),
-                                AnimatedBuilder(
-                                  animation: _laserController,
-                                  builder: (context, child) {
-                                    final minTop = reticleSize * 0.06;
-                                    final maxTravel = reticleSize * 0.86;
-                                    return Positioned(
-                                      top: minTop + (_laserController.value * maxTravel),
-                                      left: reticleSize * 0.04,
-                                      right: reticleSize * 0.04,
-                                      child: Container(
-                                        height: 3,
-                                        decoration: BoxDecoration(
-                                          gradient: const LinearGradient(
-                                            colors: [
-                                              Colors.transparent,
-                                              _primaryNeon,
-                                              Colors.white,
-                                              _primaryNeon,
-                                              Colors.transparent,
+                                if (_isCapturingPhoto)
+                                  Container(
+                                    padding: const EdgeInsets.all(18),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.78),
+                                      borderRadius: BorderRadius.circular(22),
+                                      border: Border.all(color: activeThemeColor, width: 2.5),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: activeThemeColor.withValues(alpha: 0.55),
+                                          blurRadius: 24,
+                                          spreadRadius: 2,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.camera_alt_rounded,
+                                          color: activeThemeColor,
+                                          size: isCompact ? 34 : 42,
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 3,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: activeThemeColor,
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                          child: Text(
+                                            _labelForStatus(_activeScanStatus),
+                                            style: const TextStyle(
+                                              color: Colors.black,
+                                              fontWeight: FontWeight.w900,
+                                              fontSize: 10.5,
+                                              letterSpacing: 0.6,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        if (_activeScanName != null)
+                                          Text(
+                                            _activeScanName!,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 15,
+                                            ),
+                                          ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'PLEASE STAY STILL • $_photoCountdown',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            color: activeThemeColor,
+                                            fontWeight: FontWeight.w900,
+                                            fontSize: isCompact ? 13 : 14,
+                                            letterSpacing: 0.8,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        const Text(
+                                          'Taking verification photo...',
+                                          style: TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else
+                                  AnimatedBuilder(
+                                    animation: _laserController,
+                                    builder: (context, child) {
+                                      final minTop = reticleSize * 0.06;
+                                      final maxTravel = reticleSize * 0.86;
+                                      return Positioned(
+                                        top: minTop + (_laserController.value * maxTravel),
+                                        left: reticleSize * 0.04,
+                                        right: reticleSize * 0.04,
+                                        child: Container(
+                                          height: 3,
+                                          decoration: BoxDecoration(
+                                            gradient: LinearGradient(
+                                              colors: [
+                                                Colors.transparent,
+                                                activeThemeColor,
+                                                Colors.white,
+                                                activeThemeColor,
+                                                Colors.transparent,
+                                              ],
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: activeThemeColor.withValues(alpha: 0.8),
+                                                blurRadius: 10,
+                                                spreadRadius: 2,
+                                              ),
                                             ],
                                           ),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: _primaryNeon.withValues(alpha: 0.8),
-                                              blurRadius: 10,
-                                              spreadRadius: 2,
-                                            ),
-                                          ],
                                         ),
-                                      ),
-                                    );
-                                  },
-                                ),
+                                      );
+                                    },
+                                  ),
                               ],
                             ),
                           );
@@ -674,28 +841,36 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                                 vertical: isCompact ? 6 : 8,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.68),
+                                color: _isCapturingPhoto
+                                    ? activeThemeColor.withValues(alpha: 0.9)
+                                    : Colors.black.withValues(alpha: 0.68),
                                 borderRadius: BorderRadius.circular(30),
                                 border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.15),
+                                  color: _isCapturingPhoto
+                                      ? Colors.white
+                                      : Colors.white.withValues(alpha: 0.15),
                                 ),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(
-                                    Icons.qr_code_scanner_rounded,
-                                    color: _primaryNeon,
+                                  Icon(
+                                    _isCapturingPhoto
+                                        ? Icons.camera_front_rounded
+                                        : Icons.qr_code_scanner_rounded,
+                                    color: _isCapturingPhoto ? Colors.black : activeThemeColor,
                                     size: 16,
                                   ),
                                   const SizedBox(width: 8),
                                   Flexible(
                                     child: Text(
-                                      'Align Gym / Visitor Pass QR in Frame',
+                                      _isCapturingPhoto
+                                          ? 'HOLD STILL — CAPTURING VERIFICATION PHOTO...'
+                                          : 'Align Gym / Visitor Pass QR in Frame',
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w600,
+                                        color: _isCapturingPhoto ? Colors.black : Colors.white,
+                                        fontWeight: FontWeight.w800,
                                         fontSize: isCompact ? 12 : 13,
                                       ),
                                     ),
@@ -738,7 +913,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                 ),
               ),
 
-              // 3. Adaptive Scan Result Card Modal
+              // 3. Adaptive Scan Result Card Modal (Green / Blue / Orange / Red)
               if (_activeResult != null) _buildResultModal(_activeResult!),
             ],
           );
@@ -765,7 +940,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
       ),
       child: Row(
         children: [
-          // Brand Logo & Title (Flexible to prevent overflow on narrow screens)
+          // Brand Logo & Title
           Expanded(
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -774,13 +949,13 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                   width: isCompact ? 32 : 36,
                   height: isCompact ? 32 : 36,
                   decoration: BoxDecoration(
-                    color: _primaryNeon.withValues(alpha: 0.2),
+                    color: _regularGreen.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: _primaryNeon),
+                    border: Border.all(color: _regularGreen),
                   ),
                   child: Icon(
                     Icons.fitness_center_rounded,
-                    color: _primaryNeon,
+                    color: _regularGreen,
                     size: isCompact ? 17 : 20,
                   ),
                 ),
@@ -835,8 +1010,8 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: _sync.isOnline
-                          ? _primaryNeon.withValues(alpha: 0.5)
-                          : _warningNeon.withValues(alpha: 0.5),
+                          ? _regularGreen.withValues(alpha: 0.5)
+                          : _dueOrange.withValues(alpha: 0.5),
                     ),
                   ),
                   child: Row(
@@ -846,7 +1021,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                         width: 7,
                         height: 7,
                         decoration: BoxDecoration(
-                          color: _sync.isOnline ? _primaryNeon : _warningNeon,
+                          color: _sync.isOnline ? _regularGreen : _dueOrange,
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -854,7 +1029,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                       Text(
                         _sync.isOnline ? 'Online' : 'Offline',
                         style: TextStyle(
-                          color: _sync.isOnline ? _primaryNeon : _warningNeon,
+                          color: _sync.isOnline ? _regularGreen : _dueOrange,
                           fontSize: isCompact ? 11 : 12,
                           fontWeight: FontWeight.bold,
                         ),
@@ -881,7 +1056,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.people_alt_rounded, color: _cyanNeon, size: 13),
+                      const Icon(Icons.people_alt_rounded, color: _visitorBlue, size: 13),
                       const SizedBox(width: 4),
                       Text(
                         '${_sync.cachedMembersCount}',
@@ -896,7 +1071,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                 ),
               ),
 
-              // Pending Offline Queue Badge (dynamically appears when offline scans are queued)
+              // Pending Offline Queue Badge
               if (pendingCount > 0) ...[
                 SizedBox(width: isCompact ? 5 : 8),
                 GestureDetector(
@@ -907,23 +1082,23 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: _warningNeon.withValues(alpha: 0.2),
+                      color: _dueOrange.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: _warningNeon.withValues(alpha: 0.6)),
+                      border: Border.all(color: _dueOrange.withValues(alpha: 0.6)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         const Icon(
                           Icons.cloud_upload_rounded,
-                          color: _warningNeon,
+                          color: _dueOrange,
                           size: 13,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           '$pendingCount',
                           style: TextStyle(
-                            color: _warningNeon,
+                            color: _dueOrange,
                             fontSize: isCompact ? 11 : 12,
                             fontWeight: FontWeight.bold,
                           ),
@@ -1004,12 +1179,12 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
           ),
           OutlinedButton.icon(
             onPressed: _openManualAndRosterSheet,
-            icon: const Icon(Icons.fact_check_rounded, size: 17, color: _cyanNeon),
+            icon: const Icon(Icons.fact_check_rounded, size: 17, color: _visitorBlue),
             label: Text('Manual / Roster', style: labelStyle),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.white,
               backgroundColor: Colors.black.withValues(alpha: 0.65),
-              side: BorderSide(color: _cyanNeon.withValues(alpha: 0.45)),
+              side: BorderSide(color: _visitorBlue.withValues(alpha: 0.45)),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               padding: btnPadding,
             ),
@@ -1020,24 +1195,28 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
   }
 
   Widget _buildResultModal(ScanResultInfo res) {
-    Color themeColor = _primaryNeon;
-    String bannerText = 'ACCESS GRANTED';
+    // Status Colors:
+    // Regular -> Green | Visitor -> Blue | Due -> Orange | Expired -> Red
+    Color themeColor = _regularGreen;
+    String bannerText = 'REGULAR MEMBER • ACCESS GRANTED';
     IconData icon = Icons.check_circle_rounded;
 
     if (res.isVisitor) {
-      themeColor = _cyanNeon;
+      themeColor = _visitorBlue;
       bannerText = 'VISITOR PASS • PHOTO CAPTURED';
       icon = Icons.camera_alt_rounded;
     } else if (res.isDue) {
-      themeColor = _warningNeon;
-      bannerText = 'PAYMENT DUE';
+      themeColor = _dueOrange;
+      bannerText = res.dueAmount > 0
+          ? 'UDHAAR DUE (Rs. ${res.dueAmount.toInt()}) • PHOTO CAPTURED'
+          : 'PAYMENT DUE • PHOTO CAPTURED';
       icon = Icons.warning_amber_rounded;
     } else if (res.isExpired) {
-      themeColor = _dangerNeon;
-      bannerText = 'MEMBERSHIP EXPIRED';
+      themeColor = _expiredRed;
+      bannerText = 'MEMBERSHIP EXPIRED • PHOTO CAPTURED';
       icon = Icons.cancel_rounded;
     } else if (!res.isRecognized) {
-      themeColor = _dangerNeon;
+      themeColor = _expiredRed;
       bannerText = 'UNRECOGNIZED PASS';
       icon = Icons.help_outline_rounded;
     }
@@ -1045,12 +1224,15 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
     return GestureDetector(
       onTap: _dismissResultModal,
       child: Container(
-        color: Colors.black.withValues(alpha: 0.82),
+        decoration: BoxDecoration(
+          color: themeColor.withValues(alpha: 0.28),
+          border: Border.all(color: themeColor, width: 10),
+        ),
         alignment: Alignment.center,
         padding: const EdgeInsets.all(16),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final cardMaxW = math.min(constraints.maxWidth * 0.92, 400.0);
+            final cardMaxW = math.min(constraints.maxWidth * 0.92, 410.0);
             final isSmall = constraints.maxHeight < 420 || constraints.maxWidth < 360;
 
             return SingleChildScrollView(
@@ -1059,17 +1241,17 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                 child: Container(
                   padding: EdgeInsets.all(isSmall ? 18 : 26),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF131922),
+                    color: const Color(0xFF0E131A),
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(
-                      color: themeColor.withValues(alpha: 0.65),
-                      width: 1.5,
+                      color: themeColor,
+                      width: 2.5,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: themeColor.withValues(alpha: 0.25),
-                        blurRadius: 40,
-                        spreadRadius: 4,
+                        color: themeColor.withValues(alpha: 0.45),
+                        blurRadius: 45,
+                        spreadRadius: 6,
                       ),
                     ],
                   ),
@@ -1078,14 +1260,14 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                     children: [
                       if (res.visitorPhotoBytes != null) ...[
                         Container(
-                          width: isSmall ? 76 : 96,
-                          height: isSmall ? 76 : 96,
+                          width: isSmall ? 82 : 104,
+                          height: isSmall ? 82 : 104,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            border: Border.all(color: _cyanNeon, width: 2.5),
+                            border: Border.all(color: themeColor, width: 3),
                             boxShadow: [
                               BoxShadow(
-                                color: _cyanNeon.withValues(alpha: 0.35),
+                                color: themeColor.withValues(alpha: 0.4),
                                 blurRadius: 16,
                               ),
                             ],
@@ -1098,14 +1280,14 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                           ),
                         ),
                       ] else
-                        Icon(icon, color: themeColor, size: isSmall ? 50 : 64),
+                        Icon(icon, color: themeColor, size: isSmall ? 52 : 66),
                       SizedBox(height: isSmall ? 10 : 14),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(
-                          color: themeColor.withValues(alpha: 0.15),
+                          color: themeColor.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: themeColor.withValues(alpha: 0.4)),
+                          border: Border.all(color: themeColor.withValues(alpha: 0.5)),
                         ),
                         child: Text(
                           bannerText,
@@ -1113,8 +1295,8 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                           style: TextStyle(
                             color: themeColor,
                             fontWeight: FontWeight.w900,
-                            fontSize: isSmall ? 11 : 13,
-                            letterSpacing: 0.8,
+                            fontSize: isSmall ? 11 : 12.5,
+                            letterSpacing: 0.7,
                           ),
                         ),
                       ),
@@ -1124,14 +1306,14 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                           margin: const EdgeInsets.only(bottom: 10),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: _warningNeon.withValues(alpha: 0.15),
+                            color: _dueOrange.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
                             'Offline Check-in Queued (${_sync.pendingScansCount} pending)',
                             textAlign: TextAlign.center,
                             style: const TextStyle(
-                              color: _warningNeon,
+                              color: _dueOrange,
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
                             ),
@@ -1142,7 +1324,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: isSmall ? 19 : 22,
+                          fontSize: isSmall ? 20 : 23,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -1150,8 +1332,27 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                       Text(
                         '${res.plan}${res.expiryDate.isNotEmpty ? " • Valid: ${res.expiryDate}" : ""}',
                         textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white60, fontSize: 13),
+                        style: const TextStyle(color: Colors.white70, fontSize: 13),
                       ),
+                      if (res.dueAmount > 0) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: _dueOrange.withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: _dueOrange.withValues(alpha: 0.45)),
+                          ),
+                          child: Text(
+                            'Pending Udhaar: Rs. ${res.dueAmount.toInt()}',
+                            style: const TextStyle(
+                              color: _dueOrange,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                        ),
+                      ],
                       SizedBox(height: isSmall ? 14 : 20),
                       LinearProgressIndicator(
                         backgroundColor: Colors.white10,
@@ -1205,5 +1406,5 @@ class _ReticlePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _ReticlePainter oldDelegate) => oldDelegate.color != color;
 }

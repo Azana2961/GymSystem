@@ -13,7 +13,7 @@ class OfflineStorageService {
   static final OfflineStorageService instance = OfflineStorageService._internal();
   OfflineStorageService._internal();
 
-  SharedPreferences? _prefs;
+  late SharedPreferences _prefs;
   bool _initialized = false;
 
   final Map<String, MemberItem> _membersCache = {};
@@ -27,10 +27,8 @@ class OfflineStorageService {
   }
 
   void _loadFromDisk() {
-    final prefs = _prefs;
-    if (prefs == null) return;
     // 1. Members Cache
-    final membersJson = prefs.getString(_keyMembers);
+    final membersJson = _prefs.getString(_keyMembers);
     if (membersJson != null && membersJson.isNotEmpty) {
       try {
         final decoded = jsonDecode(membersJson) as List<dynamic>;
@@ -45,7 +43,7 @@ class OfflineStorageService {
     }
 
     // 2. Pending Offline Scans
-    final pendingJson = prefs.getString(_keyPendingScans);
+    final pendingJson = _prefs.getString(_keyPendingScans);
     if (pendingJson != null && pendingJson.isNotEmpty) {
       try {
         final decoded = jsonDecode(pendingJson) as List<dynamic>;
@@ -126,7 +124,7 @@ class OfflineStorageService {
   Future<void> _persistMembers() async {
     final uniqueMembers = allMembers;
     final jsonStr = jsonEncode(uniqueMembers.map((m) => m.toJson()).toList());
-    await _prefs?.setString(_keyMembers, jsonStr);
+    await _prefs.setString(_keyMembers, jsonStr);
   }
 
   // ── Pending Offline Attendance Scans ─────────────────────────────────────
@@ -142,17 +140,17 @@ class OfflineStorageService {
 
   Future<void> clearPendingScans() async {
     _pendingScans.clear();
-    await _prefs?.remove(_keyPendingScans);
+    await _prefs.remove(_keyPendingScans);
   }
 
   Future<void> _persistPendingScans() async {
     final jsonStr = jsonEncode(_pendingScans.map((s) => s.toJson()).toList());
-    await _prefs?.setString(_keyPendingScans, jsonStr);
+    await _prefs.setString(_keyPendingScans, jsonStr);
   }
 
   // ── Server & Device Configuration ────────────────────────────────────────
 
-  String get serverUrl => _prefs?.getString(_keyServerUrl) ?? 'http://10.0.2.2:5000';
+  String get serverUrl => _prefs.getString(_keyServerUrl) ?? 'http://10.0.2.2:5000';
 
   Future<void> setServerUrl(String url) async {
     var clean = url.trim();
@@ -160,24 +158,24 @@ class OfflineStorageService {
     if (clean.isNotEmpty && !clean.startsWith('http://') && !clean.startsWith('https://')) {
       clean = 'http://$clean';
     }
-    await _prefs?.setString(_keyServerUrl, clean);
+    await _prefs.setString(_keyServerUrl, clean);
   }
 
   String get deviceId {
-    var id = _prefs?.getString(_keyDeviceId);
+    var id = _prefs.getString(_keyDeviceId);
     if (id == null) {
       id = 'tablet-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-      _prefs?.setString(_keyDeviceId, id);
+      _prefs.setString(_keyDeviceId, id);
     }
     return id;
   }
 
-  String get deviceName => _prefs?.getString(_keyDeviceName) ?? 'Lá Fitness Kiosk';
+  String get deviceName => _prefs.getString(_keyDeviceName) ?? 'Lá Fitness Kiosk';
 
   Future<void> setDeviceName(String name) async {
     final trimmed = name.trim();
     if (trimmed.isNotEmpty) {
-      await _prefs?.setString(_keyDeviceName, trimmed);
+      await _prefs.setString(_keyDeviceName, trimmed);
     }
   }
 }

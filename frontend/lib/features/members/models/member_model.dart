@@ -4,6 +4,8 @@ class MemberModel {
   final String plan;
   final DateTime expiryDate;
   final bool isPaymentPending;
+  final double dueAmount;
+  final double paidAmount;
   final String? phone;
   final String? email;
   final DateTime? startDate;
@@ -18,6 +20,8 @@ class MemberModel {
     required this.plan,
     required this.expiryDate,
     required this.isPaymentPending,
+    this.dueAmount = 0.0,
+    this.paidAmount = 0.0,
     this.phone,
     this.email,
     this.startDate,
@@ -33,6 +37,8 @@ class MemberModel {
     String? plan,
     DateTime? expiryDate,
     bool? isPaymentPending,
+    double? dueAmount,
+    double? paidAmount,
     String? phone,
     String? email,
     DateTime? startDate,
@@ -47,6 +53,8 @@ class MemberModel {
       plan: plan ?? this.plan,
       expiryDate: expiryDate ?? this.expiryDate,
       isPaymentPending: isPaymentPending ?? this.isPaymentPending,
+      dueAmount: dueAmount ?? this.dueAmount,
+      paidAmount: paidAmount ?? this.paidAmount,
       phone: phone ?? this.phone,
       email: email ?? this.email,
       startDate: startDate ?? this.startDate,
@@ -58,6 +66,8 @@ class MemberModel {
   }
 
   bool get isExpired => expiryDate.isBefore(DateTime.now());
+
+  bool get hasUdhaar => dueAmount > 0 || isPaymentPending;
 
   bool get isVisitor =>
       plan.toLowerCase().contains('visitor') ||

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gym_system/core/constants/app_settings.dart';
 import 'package:gym_system/features/members/models/member_model.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/features/members/providers/members_provider.dart';
@@ -97,9 +98,29 @@ class MemberTable extends StatelessWidget {
                           ],
                           rows: members.map((member) {
                             final isExpired = member.expiryDate.isBefore(DateTime.now());
-                            final isInactive = !member.isActive || member.isPaymentPending || isExpired;
-                            final isExpiringSoon = !isInactive && member.expiryDate.isAfter(DateTime.now()) && member.expiryDate.isBefore(DateTime.now().add(const Duration(days: 7)));
+                            final hasUdhaar = member.dueAmount > 0 || member.isPaymentPending;
+                            final isInactive = !member.isActive || hasUdhaar || isExpired;
+                            final isExpiringSoon = !isInactive &&
+                                member.expiryDate.isAfter(DateTime.now()) &&
+                                member.expiryDate.isBefore(DateTime.now().add(const Duration(days: 7)));
                             final isSelected = selectedMember?.id == member.id;
+
+                            final Color statusColor = member.isVisitor
+                                ? const Color(0xFF00E5FF)
+                                : (isExpired
+                                      ? AppColors.error
+                                      : (hasUdhaar
+                                            ? AppColors.warning
+                                            : (!member.isActive ? AppColors.error : AppColors.success)));
+                            final String statusLabel = member.isVisitor
+                                ? 'Visitor'
+                                : (isExpired
+                                      ? 'Expired'
+                                      : (hasUdhaar
+                                            ? (member.dueAmount > 0
+                                                  ? 'Due (Rs. ${AppSettings.formatAmount(member.dueAmount)})'
+                                                  : 'Due')
+                                            : (!member.isActive ? 'Inactive' : 'Active')));
 
                             return DataRow(
                               selected: isSelected,
@@ -117,10 +138,10 @@ class MemberTable extends StatelessWidget {
                                   children: [
                                     CircleAvatar(
                                       radius: 12,
-                                      backgroundColor: AppColors.primary.withValues(alpha: 0.2),
+                                      backgroundColor: statusColor.withValues(alpha: 0.2),
                                       child: Text(
                                         member.name.isNotEmpty ? member.name[0] : '?',
-                                        style: const TextStyle(fontSize: 12, color: AppColors.primary),
+                                        style: TextStyle(fontSize: 12, color: statusColor, fontWeight: FontWeight.bold),
                                       ),
                                     ),
                                     const SizedBox(width: 8),
@@ -140,17 +161,16 @@ class MemberTable extends StatelessWidget {
                                 )),
                                 DataCell(
                                   Chip(
-                                    backgroundColor: isInactive
-                                        ? AppColors.error.withValues(alpha: 0.2)
-                                        : AppColors.success.withValues(alpha: 0.2),
+                                    backgroundColor: statusColor.withValues(alpha: 0.18),
                                     label: Text(
-                                      isInactive ? 'Inactive' : 'Active',
+                                      statusLabel,
                                       style: TextStyle(
-                                        color: isInactive ? AppColors.error : AppColors.success,
-                                        fontSize: 12,
+                                        color: statusColor,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11.5,
                                       ),
                                     ),
-                                    side: BorderSide.none,
+                                    side: BorderSide(color: statusColor.withValues(alpha: 0.35)),
                                     padding: EdgeInsets.zero,
                                   ),
                                 ),
@@ -260,7 +280,7 @@ class MemberTable extends StatelessWidget {
         break;
       case 'renew':
         provider.updateMember(member.copyWith(
-          expiryDate: member.expiryDate.isBefore(DateTime.now()) 
+          expiryDate: member.expiryDate.isBefore(DateTime.now())
               ? DateTime.now().add(const Duration(days: 30))
               : member.expiryDate.add(const Duration(days: 30)),
         ));
@@ -290,10 +310,6 @@ class MemberTable extends StatelessWidget {
             onPressed: () {
               Navigator.pop(context);
               provider.deleteMember(member.id);
-              if (selectedMember?.id == member.id) {
-                // We should unselect, but we don't have direct access to setState here unless we pass a clear callback.
-                // It's handled gracefully in MembersScreen if the selected member is deleted.
-              }
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('${member.name} deleted'),

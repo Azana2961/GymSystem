@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:gym_system/core/constants/app_settings.dart';
 import 'package:gym_system/core/constants/dummy_data.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/features/dashboard/models/attendance_model.dart';
@@ -53,7 +54,8 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
             final memberExpiry =
                 DateTime.tryParse(item['member_expiry'] ?? '') ?? DateTime.now().add(const Duration(days: 30));
             final rawStatus = (item['status'] ?? 'paid').toString();
-            final isPending = rawStatus == 'due';
+            final dueAmt = (item['due_amount'] as num?)?.toDouble() ?? 0.0;
+            final isPending = rawStatus == 'due' || dueAmt > 0;
             final qrToken = item['qr_token']?.toString();
             final member = MemberModel(
               id: item['member_id'] ?? qrToken ?? 'M000',
@@ -61,6 +63,7 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
               plan: item['plan'] ?? (rawStatus == 'visitor' ? 'Visitor Pass' : 'Standard Plan'),
               expiryDate: memberExpiry,
               isPaymentPending: isPending,
+              dueAmount: dueAmt,
               phone: item['phone'],
               qrToken: qrToken,
             );
@@ -106,13 +109,21 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
     final timeStr =
         '${item.checkInTime.hour.toString().padLeft(2, '0')}:${item.checkInTime.minute.toString().padLeft(2, '0')}';
 
+    final cat = item.category;
+    final Color accentColor = cat == 'expired'
+        ? AppColors.error
+        : (cat == 'due' ? AppColors.warning : _visitorColor);
+    final String titleText = cat == 'expired'
+        ? 'Expired Member Verification Photo'
+        : (cat == 'due' ? 'Due / Udhaar Verification Photo' : 'Visitor Scan Snapshot');
+
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
-          side: BorderSide(color: _visitorColor.withValues(alpha: 0.5), width: 1.5),
+          side: BorderSide(color: accentColor.withValues(alpha: 0.6), width: 1.5),
         ),
         child: Container(
           width: 360,
@@ -123,13 +134,13 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Row(
+                  Row(
                     children: [
-                      Icon(Icons.camera_alt_rounded, color: _visitorColor, size: 18),
-                      SizedBox(width: 8),
+                      Icon(Icons.camera_alt_rounded, color: accentColor, size: 18),
+                      const SizedBox(width: 8),
                       Text(
-                        'Visitor Scan Snapshot',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
+                        titleText,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
                       ),
                     ],
                   ),
@@ -171,9 +182,28 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Visitor Pass (${item.member.qrToken ?? item.member.id}) • Checked in at $timeStr',
+                '${item.member.plan} (${item.member.qrToken ?? item.member.id}) • Checked in at $timeStr',
                 style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
               ),
+              if (item.member.dueAmount > 0) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.warning.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
+                  ),
+                  child: Text(
+                    'Pending Udhaar: Rs. ${AppSettings.formatAmount(item.member.dueAmount)}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.warning,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -414,6 +444,19 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
                                         fontSize: 10.5,
                                       ),
                                     ),
+                                    if (att.member.dueAmount > 0) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Udhaar: Rs. ${AppSettings.formatAmount(att.member.dueAmount)}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppColors.warning,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
                                     if (hasPhoto) ...[
                                       const SizedBox(height: 2),
                                       Row(
