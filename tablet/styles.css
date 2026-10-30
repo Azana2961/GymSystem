@@ -45,6 +45,7 @@ html, body {
   position: relative;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background: #000;
@@ -265,8 +266,8 @@ html, body {
 
 .scan-frame {
   position: relative;
-  width: min(320px, 68vw);
-  height: min(320px, 68vw);
+  width: min(300px, 64vw, 48vh);
+  height: min(300px, 64vw, 48vh);
   border-radius: 20px;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
   overflow: hidden;
@@ -723,4 +724,61 @@ html, body {
 @keyframes toastOut {
   from { opacity: 1; }
   to { opacity: 0; transform: translateY(-10px); }
+}
+
+/* ── Adaptive Mobile & Landscape Breakpoints ── */
+@media (max-width: 520px) {
+  .hud-topbar {
+    padding: max(10px, env(safe-area-inset-top)) 12px 10px;
+    gap: 8px;
+  }
+  .brand-logo-icon {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+  }
+  .brand-text h1 {
+    font-size: 13px;
+  }
+  .brand-text p {
+    font-size: 9px;
+  }
+  .status-pill {
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+  .icon-btn {
+    width: 34px;
+    height: 34px;
+  }
+  .scan-prompt {
+    margin-top: 14px;
+    padding: 8px 14px;
+  }
+  .scan-prompt span {
+    font-size: 12px;
+  }
+  .hud-bottombar {
+    padding: 12px 12px max(14px, env(safe-area-inset-bottom));
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .control-pill {
+    padding: 7px 12px;
+    font-size: 12px;
+  }
+}
+
+@media (max-height: 480px) and (orientation: landscape) {
+  .reticle-container {
+    flex-direction: row;
+    gap: 18px;
+  }
+  .scan-frame {
+    width: min(200px, 44vh);
+    height: min(200px, 44vh);
+  }
+  .scan-prompt {
+    margin-top: 0;
+  }
 }

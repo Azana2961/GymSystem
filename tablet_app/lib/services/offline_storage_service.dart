@@ -13,7 +13,7 @@ class OfflineStorageService {
   static final OfflineStorageService instance = OfflineStorageService._internal();
   OfflineStorageService._internal();
 
-  late SharedPreferences _prefs;
+  SharedPreferences? _prefs;
   bool _initialized = false;
 
   final Map<String, MemberItem> _membersCache = {};
@@ -27,24 +27,25 @@ class OfflineStorageService {
   }
 
   void _loadFromDisk() {
+    final prefs = _prefs;
+    if (prefs == null) return;
     // 1. Members Cache
-    final membersJson = _prefs.getString(_keyMembers);
+    final membersJson = prefs.getString(_keyMembers);
     if (membersJson != null && membersJson.isNotEmpty) {
       try {
         final decoded = jsonDecode(membersJson) as List<dynamic>;
         _membersCache.clear();
         for (final item in decoded) {
           final m = MemberItem.fromJson(item as Map<String, dynamic>);
-          _membersCache[m.qrToken] = m;
-          _membersCache[m.id] = m; // Also index by ID
+          _indexMember(m);
         }
-      } catch (e) {
+      } catch (_) {
         // Silent error recovery
       }
     }
 
     // 2. Pending Offline Scans
-    final pendingJson = _prefs.getString(_keyPendingScans);
+    final pendingJson = prefs.getString(_keyPendingScans);
     if (pendingJson != null && pendingJson.isNotEmpty) {
       try {
         final decoded = jsonDecode(pendingJson) as List<dynamic>;
@@ -56,42 +57,76 @@ class OfflineStorageService {
     }
   }
 
+  void _indexMember(MemberItem m) {
+    final token = m.qrToken.trim();
+    final id = m.id.trim();
+    if (token.isNotEmpty) {
+      _membersCache[token] = m;
+      _membersCache[token.toUpperCase()] = m;
+    }
+    if (id.isNotEmpty) {
+      _membersCache[id] = m;
+      _membersCache[id.toUpperCase()] = m;
+    }
+  }
+
   // ── Member Offline Cache ──────────────────────────────────────────────────
 
-  int get cachedMembersCount => _membersCache.values.map((m) => m.id).toSet().length;
+  List<MemberItem> get allMembers {
+    final byId = <String, MemberItem>{};
+    for (final m in _membersCache.values) {
+      byId[m.id] = m;
+    }
+    final list = byId.values.toList();
+    list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return list;
+  }
+
+  int get cachedMembersCount => allMembers.length;
 
   MemberItem? findMember(String tokenOrId) {
-    return _membersCache[tokenOrId];
+    final clean = tokenOrId.trim();
+    if (clean.isEmpty) return null;
+    final direct = _membersCache[clean] ?? _membersCache[clean.toUpperCase()];
+    if (direct != null) return direct;
+
+    final lower = clean.toLowerCase();
+    for (final m in _membersCache.values) {
+      if (m.qrToken.toLowerCase() == lower || m.id.toLowerCase() == lower) {
+        return m;
+      }
+    }
+    return null;
   }
 
   Future<void> saveMember(MemberItem member) async {
-    _membersCache[member.qrToken] = member;
-    _membersCache[member.id] = member;
+    _indexMember(member);
     await _persistMembers();
   }
 
   Future<void> saveMembersBatch(List<MemberItem> list) async {
+    _membersCache.clear();
     for (final m in list) {
-      _membersCache[m.qrToken] = m;
-      _membersCache[m.id] = m;
+      _indexMember(m);
     }
     await _persistMembers();
   }
 
   Future<void> removeMember(String tokenOrId) async {
-    final m = _membersCache[tokenOrId];
+    final m = findMember(tokenOrId);
     if (m != null) {
       _membersCache.remove(m.qrToken);
+      _membersCache.remove(m.qrToken.toUpperCase());
       _membersCache.remove(m.id);
+      _membersCache.remove(m.id.toUpperCase());
       await _persistMembers();
     }
   }
 
   Future<void> _persistMembers() async {
-    // Unique list by ID
-    final uniqueMembers = _membersCache.values.map((m) => m.id).toSet().map((id) => _membersCache[id]!).toList();
+    final uniqueMembers = allMembers;
     final jsonStr = jsonEncode(uniqueMembers.map((m) => m.toJson()).toList());
-    await _prefs.setString(_keyMembers, jsonStr);
+    await _prefs?.setString(_keyMembers, jsonStr);
   }
 
   // ── Pending Offline Attendance Scans ─────────────────────────────────────
@@ -107,36 +142,42 @@ class OfflineStorageService {
 
   Future<void> clearPendingScans() async {
     _pendingScans.clear();
-    await _prefs.remove(_keyPendingScans);
+    await _prefs?.remove(_keyPendingScans);
   }
 
   Future<void> _persistPendingScans() async {
     final jsonStr = jsonEncode(_pendingScans.map((s) => s.toJson()).toList());
-    await _prefs.setString(_keyPendingScans, jsonStr);
+    await _prefs?.setString(_keyPendingScans, jsonStr);
   }
 
   // ── Server & Device Configuration ────────────────────────────────────────
 
-  String get serverUrl => _prefs.getString(_keyServerUrl) ?? 'http://10.0.2.2:5000';
+  String get serverUrl => _prefs?.getString(_keyServerUrl) ?? 'http://10.0.2.2:5000';
 
   Future<void> setServerUrl(String url) async {
     var clean = url.trim();
     if (clean.endsWith('/')) clean = clean.substring(0, clean.length - 1);
-    await _prefs.setString(_keyServerUrl, clean);
+    if (clean.isNotEmpty && !clean.startsWith('http://') && !clean.startsWith('https://')) {
+      clean = 'http://$clean';
+    }
+    await _prefs?.setString(_keyServerUrl, clean);
   }
 
   String get deviceId {
-    var id = _prefs.getString(_keyDeviceId);
+    var id = _prefs?.getString(_keyDeviceId);
     if (id == null) {
       id = 'tablet-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-      _prefs.setString(_keyDeviceId, id);
+      _prefs?.setString(_keyDeviceId, id);
     }
     return id;
   }
 
-  String get deviceName => _prefs.getString(_keyDeviceName) ?? 'Gym Tablet Kiosk';
+  String get deviceName => _prefs?.getString(_keyDeviceName) ?? 'Lá Fitness Kiosk';
 
   Future<void> setDeviceName(String name) async {
-    await _prefs.setString(_keyDeviceName, name.trim());
+    final trimmed = name.trim();
+    if (trimmed.isNotEmpty) {
+      await _prefs?.setString(_keyDeviceName, trimmed);
+    }
   }
 }

@@ -43,6 +43,9 @@ class KioskSyncService extends ChangeNotifier {
   bool _isOnline = false;
   bool get isOnline => _isOnline;
 
+  bool _isSyncing = false;
+  bool get isSyncing => _isSyncing;
+
   WebSocketChannel? _wsChannel;
   StreamSubscription? _wsSub;
   Timer? _reconnectTimer;
@@ -50,6 +53,7 @@ class KioskSyncService extends ChangeNotifier {
 
   int get cachedMembersCount => _storage.cachedMembersCount;
   int get pendingScansCount => _storage.pendingScansCount;
+  List<MemberItem> get cachedMembers => _storage.allMembers;
   String get serverUrl => _storage.serverUrl;
 
   Future<void> init() async {
@@ -57,19 +61,22 @@ class KioskSyncService extends ChangeNotifier {
     await connect();
   }
 
-  Future<void> connect() async {
+  Future<bool> connect() async {
     _reconnectTimer?.cancel();
 
     // 1. Check HTTP Ping Reachability (with auto-discovery for Android Emulator 10.0.2.2 & LAN IP)
     final candidates = <String>{
       serverUrl,
       'http://10.0.2.2:5000',
+      'http://10.5.49.144:5000',
       'http://10.5.40.52:5000',
       'http://localhost:5000',
+      'http://127.0.0.1:5000',
     };
 
     bool reachable = false;
     for (final candidate in candidates) {
+      if (candidate.trim().isEmpty) continue;
       try {
         final pingUri = Uri.parse('$candidate/api/ping');
         final res = await http.get(pingUri).timeout(const Duration(seconds: 2));
@@ -89,9 +96,9 @@ class KioskSyncService extends ChangeNotifier {
 
       // Sync latest members
       await syncMembersRoster();
-      // Flush any queued offline scans
+      // Flush any queued offline scans (including visitor photos)
       await flushOfflineScans();
-      // Open WebSocket Channel
+      // Open WebSocket Channel for instant live member updates
       _openWebSocket();
     } else {
       _isOnline = false;
@@ -99,8 +106,9 @@ class KioskSyncService extends ChangeNotifier {
       _scheduleReconnect();
     }
 
-    // 3. Heartbeat
+    // 3. Heartbeat & Background Queue Monitor
     _startHeartbeat();
+    return _isOnline;
   }
 
   void _openWebSocket() {
@@ -159,7 +167,7 @@ class KioskSyncService extends ChangeNotifier {
 
       switch (type) {
         case 'member:new':
-          // Once PC app adds a member, it sends it to tablet!
+          // Once PC app adds a member, it immediately caches on the tablet/mobile!
           if (data is Map<String, dynamic>) {
             final newMember = MemberItem.fromJson(data);
             _storage.saveMember(newMember);
@@ -198,8 +206,12 @@ class KioskSyncService extends ChangeNotifier {
 
   /// Download complete member roster for offline caching
   Future<int> syncMembersRoster() async {
+    _isSyncing = true;
+    notifyListeners();
     try {
-      final res = await http.get(Uri.parse('$serverUrl/api/members/sync')).timeout(const Duration(seconds: 5));
+      final res = await http
+          .get(Uri.parse('$serverUrl/api/members/sync'))
+          .timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) {
         final json = jsonDecode(res.body) as Map<String, dynamic>;
         if (json['members'] is List) {
@@ -207,31 +219,38 @@ class KioskSyncService extends ChangeNotifier {
               .map((m) => MemberItem.fromJson(m as Map<String, dynamic>))
               .toList();
           await _storage.saveMembersBatch(list);
+          _isOnline = true;
+          _isSyncing = false;
           notifyListeners();
           return list.length;
         }
       }
     } catch (_) {}
+    _isSyncing = false;
+    notifyListeners();
     return 0;
   }
 
-  /// Upload queued offline check-ins to PC
+  /// Upload queued offline check-ins (with visitor photos) to PC
   Future<int> flushOfflineScans() async {
     final pending = _storage.pendingScans;
     if (pending.isEmpty) return 0;
 
     try {
-      final res = await http.post(
-        Uri.parse('$serverUrl/api/attendance/batch'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'scans': pending.map((s) => s.toJson()).toList(),
-        }),
-      ).timeout(const Duration(seconds: 6));
+      final res = await http
+          .post(
+            Uri.parse('$serverUrl/api/attendance/batch'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'scans': pending.map((s) => s.toJson()).toList(),
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
 
       if (res.statusCode == 200) {
         final processed = pending.length;
         await _storage.clearPendingScans();
+        _isOnline = true;
         notifyListeners();
         return processed;
       }
@@ -245,34 +264,53 @@ class KioskSyncService extends ChangeNotifier {
     if (clean.toUpperCase().startsWith('VIS-')) return true;
     final member = _storage.findMember(clean);
     if (member != null) {
-      return member.status == 'visitor' || (member.plan?.toLowerCase().contains('visitor') ?? false);
+      return member.status == 'visitor' ||
+          (member.plan?.toLowerCase().contains('visitor') ?? false);
     }
     return false;
   }
 
-  /// Process an attendance scan (Online with immediate PC sync, or Offline with local verification)
+  /// Process an attendance scan (Online with immediate PC sync, or Offline with local verification & queuing)
   Future<ScanResultInfo> processScan(String qrToken, {Uint8List? visitorPhotoBytes}) async {
     final cleanToken = qrToken.trim();
     final timestamp = DateTime.now().toIso8601String();
-    final visitorPhotoBase64 = visitorPhotoBytes != null ? base64Encode(visitorPhotoBytes) : null;
+    final visitorPhotoBase64 =
+        visitorPhotoBytes != null ? base64Encode(visitorPhotoBytes) : null;
 
     // 1. Try Online Scan
     if (_isOnline) {
       try {
-        final res = await http.post(
-          Uri.parse('$serverUrl/api/attendance/scan'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'qr_token': cleanToken,
-            'scanned_at': timestamp,
-            'device_id': _storage.deviceId,
-            if (visitorPhotoBase64 != null) 'visitor_photo_base64': visitorPhotoBase64,
-          }),
-        ).timeout(const Duration(seconds: 3));
+        final res = await http
+            .post(
+              Uri.parse('$serverUrl/api/attendance/scan'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'qr_token': cleanToken,
+                'scanned_at': timestamp,
+                'device_id': _storage.deviceId,
+                'visitor_photo_base64': ?visitorPhotoBase64,
+              }),
+            )
+            .timeout(const Duration(seconds: 3));
 
         if (res.statusCode == 200) {
           final json = jsonDecode(res.body) as Map<String, dynamic>;
           final memberData = json['member'] as Map<String, dynamic>?;
+          if (memberData != null) {
+            await _storage.saveMember(MemberItem(
+              id: memberData['id']?.toString() ?? cleanToken,
+              qrToken: cleanToken,
+              name: memberData['name']?.toString() ?? 'Member',
+              status: json['status']?.toString() ?? 'paid',
+              expiryDate: memberData['expiry_date']?.toString() ?? '',
+              plan: memberData['plan']?.toString(),
+            ));
+          }
+          // Flush any previously queued offline scans in background
+          if (_storage.pendingScansCount > 0) {
+            unawaited(flushOfflineScans());
+          }
+          notifyListeners();
           return ScanResultInfo(
             isOnline: true,
             isRecognized: true,
@@ -283,14 +321,31 @@ class KioskSyncService extends ChangeNotifier {
             qrToken: cleanToken,
             visitorPhotoBytes: visitorPhotoBytes,
           );
+        } else if (res.statusCode == 404) {
+          // Server is online and explicitly reported token not found
+          final localFallback = _storage.findMember(cleanToken);
+          if (localFallback == null) {
+            return ScanResultInfo(
+              isOnline: true,
+              isRecognized: false,
+              status: 'unrecognized',
+              memberName: 'Unrecognized Pass',
+              plan: 'QR Code Not Found in System',
+              expiryDate: '',
+              qrToken: cleanToken,
+            );
+          }
         }
       } catch (_) {
         _isOnline = false;
         notifyListeners();
+        _scheduleReconnect();
       }
+    } else {
+      _scheduleReconnect();
     }
 
-    // 2. Offline Fallback
+    // 2. Offline Fallback: Verify against local cached member roster & queue scan + photo
     final member = _storage.findMember(cleanToken);
     if (member != null) {
       final isVis = member.status == 'visitor' ||
@@ -301,7 +356,7 @@ class KioskSyncService extends ChangeNotifier {
         status = 'expired';
       }
 
-      // Record locally to offline queue
+      // Record locally to offline queue (with visitor photo if captured)
       await _storage.addPendingScan(AttendanceRecord(
         qrToken: cleanToken,
         memberName: member.name,
@@ -318,7 +373,7 @@ class KioskSyncService extends ChangeNotifier {
         isRecognized: true,
         status: status,
         memberName: member.name,
-        plan: member.plan ?? 'Standard Plan',
+        plan: member.plan ?? (isVis ? 'Visitor Pass' : 'Standard Plan'),
         expiryDate: member.expiryDate,
         qrToken: cleanToken,
         visitorPhotoBytes: visitorPhotoBytes,
@@ -338,20 +393,38 @@ class KioskSyncService extends ChangeNotifier {
 
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(const Duration(seconds: 35), (_) async {
-      if (!_isOnline) return;
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 25), (_) async {
+      if (!_isOnline) {
+        await connect();
+        return;
+      }
       try {
-        await http.post(
-          Uri.parse('$serverUrl/api/tablet/heartbeat'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'device_id': _storage.deviceId,
-            'device_name': _storage.deviceName,
-            'battery_level': 100,
-            'app_version': '2.0.0-flutter',
-          }),
-        ).timeout(const Duration(seconds: 3));
-      } catch (_) {}
+        final res = await http
+            .post(
+              Uri.parse('$serverUrl/api/tablet/heartbeat'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'device_id': _storage.deviceId,
+                'device_name': _storage.deviceName,
+                'battery_level': 100,
+                'app_version': '2.1.0-adaptive',
+              }),
+            )
+            .timeout(const Duration(seconds: 3));
+        if (res.statusCode == 200) {
+          if (_storage.pendingScansCount > 0) {
+            await flushOfflineScans();
+          }
+        } else {
+          _isOnline = false;
+          notifyListeners();
+          _scheduleReconnect();
+        }
+      } catch (_) {
+        _isOnline = false;
+        notifyListeners();
+        _scheduleReconnect();
+      }
     });
   }
 

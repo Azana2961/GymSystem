@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import '../models/member_item.dart';
 import '../services/kiosk_sync_service.dart';
 import '../services/offline_storage_service.dart';
 
@@ -66,7 +68,8 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
 
   Future<Uint8List?> _captureCameraFallback() async {
     try {
-      final boundary = _cameraRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      final boundary =
+          _cameraRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) return null;
       final ui.Image image = await boundary.toImage(pixelRatio: 1.0);
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
@@ -76,23 +79,20 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
     }
   }
 
-  Future<void> _handleBarcode(BarcodeCapture capture) async {
+  Future<void> _triggerTokenCheckIn(String rawValue, {Uint8List? capturedImage}) async {
     if (_isProcessingScan) return;
-    final barcodes = capture.barcodes;
-    if (barcodes.isEmpty) return;
-
-    final rawValue = barcodes.first.rawValue;
-    if (rawValue == null || rawValue.trim().isEmpty) return;
+    final clean = rawValue.trim();
+    if (clean.isEmpty) return;
 
     setState(() => _isProcessingScan = true);
 
     // If this QR belongs to a Visitor Pass, capture the visitor's photo from camera
     Uint8List? visitorPhotoBytes;
-    if (_sync.isVisitorToken(rawValue)) {
-      visitorPhotoBytes = capture.image ?? await _captureCameraFallback();
+    if (_sync.isVisitorToken(clean)) {
+      visitorPhotoBytes = capturedImage ?? await _captureCameraFallback();
     }
 
-    final result = await _sync.processScan(rawValue, visitorPhotoBytes: visitorPhotoBytes);
+    final result = await _sync.processScan(clean, visitorPhotoBytes: visitorPhotoBytes);
 
     if (mounted) {
       setState(() => _activeResult = result);
@@ -109,6 +109,251 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
     }
   }
 
+  void _dismissResultModal() {
+    _cooldownTimer?.cancel();
+    setState(() {
+      _activeResult = null;
+      _isProcessingScan = false;
+    });
+  }
+
+  Future<void> _handleBarcode(BarcodeCapture capture) async {
+    if (_isProcessingScan) return;
+    final barcodes = capture.barcodes;
+    if (barcodes.isEmpty) return;
+
+    final rawValue = barcodes.first.rawValue;
+    if (rawValue == null || rawValue.trim().isEmpty) return;
+
+    await _triggerTokenCheckIn(rawValue, capturedImage: capture.image);
+  }
+
+  void _openManualAndRosterSheet() {
+    final tokenCtrl = TextEditingController();
+    String searchQuery = '';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: const Color(0xFF0F1318),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final media = MediaQuery.of(ctx);
+          final allMembers = _sync.cachedMembers;
+          final filtered = searchQuery.isEmpty
+              ? allMembers
+              : allMembers.where((m) {
+                  final q = searchQuery.toLowerCase();
+                  return m.name.toLowerCase().contains(q) ||
+                      m.qrToken.toLowerCase().contains(q) ||
+                      m.id.toLowerCase().contains(q) ||
+                      (m.phone?.toLowerCase().contains(q) ?? false);
+                }).toList();
+
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 18,
+              bottom: media.viewInsets.bottom + 20,
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: media.size.height * 0.82,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Manual Check-In & Offline Roster',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              '${allMembers.length} synced members available offline',
+                              style: const TextStyle(color: Colors.white54, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // Manual QR Token / Member ID Input
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: tokenCtrl,
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          onChanged: (val) => setModalState(() => searchQuery = val.trim()),
+                          onSubmitted: (val) {
+                            if (val.trim().isNotEmpty) {
+                              Navigator.pop(ctx);
+                              _triggerTokenCheckIn(val.trim());
+                            }
+                          },
+                          decoration: InputDecoration(
+                            filled: true,
+                            fillColor: Colors.white.withValues(alpha: 0.06),
+                            contentPadding:
+                                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.white12),
+                            ),
+                            prefixIcon: const Icon(
+                              Icons.search_rounded,
+                              color: _cyanNeon,
+                              size: 20,
+                            ),
+                            hintText: 'Search name or enter QR token (e.g. GYM-... / VIS-...)',
+                            hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () {
+                          final txt = tokenCtrl.text.trim();
+                          if (txt.isNotEmpty) {
+                            Navigator.pop(ctx);
+                            _triggerTokenCheckIn(txt);
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _primaryNeon,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Check In',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Flexible(
+                    child: filtered.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 28),
+                            child: Center(
+                              child: Text(
+                                allMembers.isEmpty
+                                    ? 'No cached members yet. Connect to PC server to sync roster.'
+                                    : 'No matching member in local cache. Tap "Check In" to scan raw token.',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: Colors.white54, fontSize: 13),
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            shrinkWrap: true,
+                            itemCount: filtered.length,
+                            separatorBuilder: (_, _) =>
+                                const Divider(color: Colors.white10, height: 1),
+                            itemBuilder: (context, index) {
+                              final MemberItem m = filtered[index];
+                              final isVis = m.status == 'visitor' ||
+                                  m.qrToken.toUpperCase().startsWith('VIS-') ||
+                                  (m.plan?.toLowerCase().contains('visitor') ?? false);
+                              final Color badgeColor = isVis
+                                  ? _cyanNeon
+                                  : (m.isExpired
+                                      ? _dangerNeon
+                                      : (m.isDue ? _warningNeon : _primaryNeon));
+                              final String badgeLabel = isVis
+                                  ? 'VISITOR'
+                                  : (m.isExpired
+                                      ? 'EXPIRED'
+                                      : (m.isDue ? 'DUE' : 'ACTIVE'));
+
+                              return ListTile(
+                                contentPadding:
+                                    const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                leading: CircleAvatar(
+                                  backgroundColor: badgeColor.withValues(alpha: 0.15),
+                                  child: Icon(
+                                    isVis
+                                        ? Icons.camera_alt_rounded
+                                        : Icons.person_rounded,
+                                    color: badgeColor,
+                                    size: 18,
+                                  ),
+                                ),
+                                title: Text(
+                                  m.name,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '${m.qrToken} • ${m.plan ?? "Member"} • Exp: ${m.expiryDate}',
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                trailing: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: badgeColor.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                        color: badgeColor.withValues(alpha: 0.45)),
+                                  ),
+                                  child: Text(
+                                    badgeLabel,
+                                    style: TextStyle(
+                                      color: badgeColor,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  _triggerTokenCheckIn(m.qrToken);
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _openSettingsDialog() {
     final hostCtrl = TextEditingController(text: _storage.serverUrl);
     final nameCtrl = TextEditingController(text: _storage.deviceName);
@@ -116,103 +361,168 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: const Color(0xFF0F1318),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) => Padding(
-          padding: EdgeInsets.only(
-            left: 24,
-            right: 24,
-            top: 24,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Tablet Kiosk Settings',
-                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    icon: const Icon(Icons.close_rounded, color: Colors.white70),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              const Text('PC App Host IP / Server URL', style: TextStyle(color: Colors.white70, fontSize: 13)),
-              const SizedBox(height: 6),
-              TextField(
-                controller: hostCtrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: Colors.white.withValues(alpha: 0.05),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  hintText: 'http://192.168.1.50:5000',
-                  hintStyle: const TextStyle(color: Colors.white38),
+        builder: (context, setModalState) {
+          final viewInsets = MediaQuery.of(ctx).viewInsets;
+          return SingleChildScrollView(
+            padding: EdgeInsets.only(
+              left: 22,
+              right: 22,
+              top: 20,
+              bottom: viewInsets.bottom + 24,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Flexible(
+                      child: Text(
+                        'Kiosk Connection & Offline Settings',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
+                const SizedBox(height: 12),
+                const Text(
+                  'PC Server Host IP / URL',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: hostCtrl,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: Colors.white.withValues(alpha: 0.05),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    hintText: 'http://192.168.1.50:5000',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Kiosk Device Name',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: nameCtrl,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: Colors.white.withValues(alpha: 0.05),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    hintText: 'Front Desk Kiosk',
+                    hintStyle: const TextStyle(color: Colors.white38),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    OutlinedButton.icon(
                       onPressed: () async {
                         final sm = ScaffoldMessenger.of(context);
+                        await _storage.setServerUrl(hostCtrl.text);
                         await _sync.connect();
+                        setModalState(() {});
                         sm.showSnackBar(
-                          SnackBar(content: Text(_sync.isOnline ? 'Connected to PC!' : 'PC unreachable')),
+                          SnackBar(
+                            content: Text(
+                              _sync.isOnline
+                                  ? 'Connected to PC (${_sync.serverUrl})!'
+                                  : 'PC unreachable — running in Offline Mode',
+                            ),
+                          ),
                         );
                       },
                       icon: const Icon(Icons.network_check_rounded, size: 16),
                       label: const Text('Test Ping'),
                       style: OutlinedButton.styleFrom(foregroundColor: _cyanNeon),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
+                    OutlinedButton.icon(
                       onPressed: () async {
                         final sm = ScaffoldMessenger.of(context);
                         final n = await _sync.syncMembersRoster();
+                        setModalState(() {});
                         sm.showSnackBar(
-                          SnackBar(content: Text('Downloaded $n members to offline cache!')),
+                          SnackBar(
+                            content: Text('Synced $n members to offline cache!'),
+                          ),
                         );
                       },
                       icon: const Icon(Icons.sync_rounded, size: 16),
-                      label: const Text('Sync Now'),
+                      label: Text('Sync Roster (${_sync.cachedMembersCount})'),
                       style: OutlinedButton.styleFrom(foregroundColor: _primaryNeon),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              ElevatedButton.icon(
-                onPressed: () async {
-                  final nav = Navigator.of(ctx);
-                  await _storage.setServerUrl(hostCtrl.text);
-                  await _storage.setDeviceName(nameCtrl.text);
-                  await _sync.connect();
-                  nav.pop();
-                },
-                icon: const Icon(Icons.check_rounded, color: Colors.black),
-                label: const Text('Save & Reconnect', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _primaryNeon,
-                  minimumSize: const Size.fromHeight(48),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    if (_sync.pendingScansCount > 0)
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final sm = ScaffoldMessenger.of(context);
+                          final flushed = await _sync.flushOfflineScans();
+                          setModalState(() {});
+                          sm.showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                flushed > 0
+                                    ? 'Uploaded $flushed queued offline scans to PC!'
+                                    : 'Still offline — ${ _sync.pendingScansCount} scans safely queued.',
+                              ),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.cloud_upload_rounded, size: 16),
+                        label: Text('Upload Queued (${_sync.pendingScansCount})'),
+                        style: OutlinedButton.styleFrom(foregroundColor: _warningNeon),
+                      ),
+                  ],
                 ),
-              ),
-            ],
-          ),
-        ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    final nav = Navigator.of(ctx);
+                    await _storage.setServerUrl(hostCtrl.text);
+                    await _storage.setDeviceName(nameCtrl.text);
+                    await _sync.connect();
+                    nav.pop();
+                  },
+                  icon: const Icon(Icons.check_rounded, color: Colors.black),
+                  label: const Text(
+                    'Save & Reconnect',
+                    style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _primaryNeon,
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -221,250 +531,489 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _bgDark,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          // 1. Fullscreen Camera Viewport
-          RepaintBoundary(
-            key: _cameraRepaintKey,
-            child: MobileScanner(
-              controller: _cameraController,
-              onDetect: _handleBarcode,
-              errorBuilder: (ctx, err) => Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.videocam_off_rounded, color: _dangerNeon, size: 54),
-                      const SizedBox(height: 14),
-                      const Text('Camera Access Error', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 6),
-                      Text(err.errorDetails?.message ?? 'Please check camera permissions in tablet settings', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white60, fontSize: 13)),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
+      resizeToAvoidBottomInset: false,
+      body: LayoutBuilder(
+        builder: (context, screenConstraints) {
+          final screenW = screenConstraints.maxWidth;
+          final isCompact = screenW < 420;
 
-          // 2. Center Scanning Reticle Frame with Sweeping Laser
-          Center(
-            child: SizedBox(
-              width: 300,
-              height: 300,
-              child: Stack(
-                children: [
-                  // 4 Corner Guides
-                  CustomPaint(
-                    size: const Size(300, 300),
-                    painter: _ReticlePainter(color: _primaryNeon),
-                  ),
-                  // Sweeping Neon Laser
-                  AnimatedBuilder(
-                    animation: _laserController,
-                    builder: (context, child) => Positioned(
-                      top: 15 + (_laserController.value * 270),
-                      left: 10,
-                      right: 10,
-                      child: Container(
-                        height: 3,
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [Colors.transparent, _primaryNeon, Colors.white, _primaryNeon, Colors.transparent],
-                          ),
-                          boxShadow: [
-                            BoxShadow(color: _primaryNeon.withValues(alpha: 0.8), blurRadius: 10, spreadRadius: 2),
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              // 1. Fullscreen Adaptive Camera Viewport (Zero Dead Pixels)
+              RepaintBoundary(
+                key: _cameraRepaintKey,
+                child: SizedBox.expand(
+                  child: MobileScanner(
+                    controller: _cameraController,
+                    fit: BoxFit.cover,
+                    onDetect: _handleBarcode,
+                    errorBuilder: (ctx, err) => Container(
+                      color: _bgDark,
+                      alignment: Alignment.center,
+                      padding: const EdgeInsets.all(24.0),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 360),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.videocam_off_rounded,
+                              color: _dangerNeon,
+                              size: 48,
+                            ),
+                            const SizedBox(height: 12),
+                            const Text(
+                              'Camera Unavailable',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              err.errorDetails?.message ??
+                                  'Grant camera permission or use Manual / Roster Check-In below.',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: Colors.white60, fontSize: 12),
+                            ),
+                            const SizedBox(height: 16),
+                            OutlinedButton.icon(
+                              onPressed: _openManualAndRosterSheet,
+                              icon: const Icon(Icons.list_alt_rounded, size: 16),
+                              label: const Text('Open Manual Check-In & Roster'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: _primaryNeon,
+                                side: const BorderSide(color: _primaryNeon),
+                              ),
+                            ),
                           ],
                         ),
                       ),
                     ),
                   ),
-                ],
-              ),
-            ),
-          ),
-
-          // Center Scan Prompt
-          Positioned(
-            left: 0,
-            right: 0,
-            top: MediaQuery.of(context).size.height / 2 + 170,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.65),
-                  borderRadius: BorderRadius.circular(30),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.qr_code_scanner_rounded, color: _primaryNeon, size: 18),
-                    SizedBox(width: 8),
-                    Text(
-                      'Hold Gym Pass QR Code in Center',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
-                    ),
-                  ],
                 ),
               ),
-            ),
-          ),
 
-          // 3. Top Floating HUD Status Bar
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.black.withValues(alpha: 0.85), Colors.transparent],
-                  ),
-                ),
-                child: Row(
+              // 2. Adaptive HUD Layout (Top Bar + Responsive Reticle + Bottom Controls)
+              SafeArea(
+                child: Column(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // Brand Logo
-                    Row(
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: _primaryNeon.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: _primaryNeon),
-                          ),
-                          child: const Icon(Icons.fitness_center_rounded, color: _primaryNeon, size: 20),
-                        ),
-                        const SizedBox(width: 10),
-                        const Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('LÁ FITNESS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 15)),
-                            Text('TABLET KIOSK SCANNER', style: TextStyle(color: Colors.white54, fontSize: 10, letterSpacing: 0.5)),
-                          ],
-                        ),
-                      ],
-                    ),
+                    // Top HUD Status Bar
+                    _buildTopHudBar(isCompact),
 
-                    // Status Badges & Action Buttons
-                    Row(
-                      children: [
-                        // Online / Offline Status
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.65),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: _sync.isOnline ? _primaryNeon.withValues(alpha: 0.5) : _warningNeon.withValues(alpha: 0.5),
+                    // Middle Adaptive Reticle & Prompt Area
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, middleConstraints) {
+                          final availW = middleConstraints.maxWidth;
+                          final availH = middleConstraints.maxHeight;
+                          final isShortLandscape = availH < 250 && availW > availH;
+
+                          // Dynamically scale reticle to fit any screen without clipping
+                          final double reticleSize = isShortLandscape
+                              ? (availH * 0.78).clamp(110.0, 220.0)
+                              : math
+                                  .min(availW * 0.68, availH * 0.62)
+                                  .clamp(130.0, 310.0);
+
+                          final reticleWidget = SizedBox(
+                            width: reticleSize,
+                            height: reticleSize,
+                            child: Stack(
+                              children: [
+                                CustomPaint(
+                                  size: Size(reticleSize, reticleSize),
+                                  painter: _ReticlePainter(color: _primaryNeon),
+                                ),
+                                AnimatedBuilder(
+                                  animation: _laserController,
+                                  builder: (context, child) {
+                                    final minTop = reticleSize * 0.06;
+                                    final maxTravel = reticleSize * 0.86;
+                                    return Positioned(
+                                      top: minTop + (_laserController.value * maxTravel),
+                                      left: reticleSize * 0.04,
+                                      right: reticleSize * 0.04,
+                                      child: Container(
+                                        height: 3,
+                                        decoration: BoxDecoration(
+                                          gradient: const LinearGradient(
+                                            colors: [
+                                              Colors.transparent,
+                                              _primaryNeon,
+                                              Colors.white,
+                                              _primaryNeon,
+                                              Colors.transparent,
+                                            ],
+                                          ),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: _primaryNeon.withValues(alpha: 0.8),
+                                              blurRadius: 10,
+                                              spreadRadius: 2,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ],
                             ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color: _sync.isOnline ? _primaryNeon : _warningNeon,
-                                  shape: BoxShape.circle,
+                          );
+
+                          final promptWidget = Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Container(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isCompact ? 14 : 18,
+                                vertical: isCompact ? 6 : 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.68),
+                                borderRadius: BorderRadius.circular(30),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.15),
                                 ),
                               ),
-                              const SizedBox(width: 6),
-                              Text(
-                                _sync.isOnline ? 'Online' : 'Offline',
-                                style: TextStyle(
-                                  color: _sync.isOnline ? _primaryNeon : _warningNeon,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.qr_code_scanner_rounded,
+                                    color: _primaryNeon,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Text(
+                                      'Align Gym / Visitor Pass QR in Frame',
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: isCompact ? 12 : 13,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
+                            ),
+                          );
 
-                        // Cached Count
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.65),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.people_alt_rounded, color: _cyanNeon, size: 14),
-                              const SizedBox(width: 4),
-                              Text('${_sync.cachedMembersCount}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
+                          if (isShortLandscape) {
+                            return Center(
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  reticleWidget,
+                                  const SizedBox(width: 16),
+                                  Flexible(child: promptWidget),
+                                ],
+                              ),
+                            );
+                          }
 
-                        // Settings Icon
-                        IconButton(
-                          onPressed: _openSettingsDialog,
-                          icon: const Icon(Icons.settings_rounded, color: Colors.white),
-                          style: IconButton.styleFrom(backgroundColor: Colors.black.withValues(alpha: 0.5)),
-                        ),
-                      ],
+                          return Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                reticleWidget,
+                                SizedBox(height: (availH * 0.04).clamp(8.0, 22.0)),
+                                promptWidget,
+                              ],
+                            ),
+                          );
+                        },
+                      ),
                     ),
+
+                    // Bottom Adaptive Controls
+                    _buildBottomControls(isCompact),
                   ],
                 ),
               ),
-            ),
-          ),
 
-          // 4. Bottom Controls (Flip Camera / Torch)
-          Positioned(
-            bottom: 24,
-            left: 0,
-            right: 0,
+              // 3. Adaptive Scan Result Card Modal
+              if (_activeResult != null) _buildResultModal(_activeResult!),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildTopHudBar(bool isCompact) {
+    final pendingCount = _sync.pendingScansCount;
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: isCompact ? 10 : 16,
+        vertical: isCompact ? 8 : 12,
+      ),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.black.withValues(alpha: 0.88), Colors.transparent],
+        ),
+      ),
+      child: Row(
+        children: [
+          // Brand Logo & Title (Flexible to prevent overflow on narrow screens)
+          Expanded(
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                OutlinedButton.icon(
-                  onPressed: () => _cameraController.switchCamera(),
-                  icon: const Icon(Icons.cameraswitch_rounded, size: 18),
-                  label: const Text('Flip Camera'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: Colors.black.withValues(alpha: 0.6),
-                    side: const BorderSide(color: Colors.white24),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                Container(
+                  width: isCompact ? 32 : 36,
+                  height: isCompact ? 32 : 36,
+                  decoration: BoxDecoration(
+                    color: _primaryNeon.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: _primaryNeon),
+                  ),
+                  child: Icon(
+                    Icons.fitness_center_rounded,
+                    color: _primaryNeon,
+                    size: isCompact ? 17 : 20,
                   ),
                 ),
-                const SizedBox(width: 14),
-                OutlinedButton.icon(
-                  onPressed: () => _cameraController.toggleTorch(),
-                  icon: const Icon(Icons.flash_on_rounded, size: 18),
-                  label: const Text('Flashlight'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: Colors.black.withValues(alpha: 0.6),
-                    side: const BorderSide(color: Colors.white24),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                SizedBox(width: isCompact ? 8 : 10),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'LÁ FITNESS',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: isCompact ? 13 : 15,
+                        ),
+                      ),
+                      Text(
+                        'KIOSK SCANNER',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: isCompact ? 9 : 10,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
+          const SizedBox(width: 6),
 
-          // 5. Scan Result Card Modal
-          if (_activeResult != null)
-            _buildResultModal(_activeResult!),
+          // Status Badges & Action Buttons
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Online / Offline Status Pill
+              GestureDetector(
+                onTap: () => _sync.connect(),
+                child: Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isCompact ? 8 : 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.65),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: _sync.isOnline
+                          ? _primaryNeon.withValues(alpha: 0.5)
+                          : _warningNeon.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: BoxDecoration(
+                          color: _sync.isOnline ? _primaryNeon : _warningNeon,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        _sync.isOnline ? 'Online' : 'Offline',
+                        style: TextStyle(
+                          color: _sync.isOnline ? _primaryNeon : _warningNeon,
+                          fontSize: isCompact ? 11 : 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(width: isCompact ? 5 : 8),
+
+              // Cached Members Count (Tap to view offline roster)
+              GestureDetector(
+                onTap: _openManualAndRosterSheet,
+                child: Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isCompact ? 8 : 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.65),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.people_alt_rounded, color: _cyanNeon, size: 13),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${_sync.cachedMembersCount}',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: isCompact ? 11 : 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Pending Offline Queue Badge (dynamically appears when offline scans are queued)
+              if (pendingCount > 0) ...[
+                SizedBox(width: isCompact ? 5 : 8),
+                GestureDetector(
+                  onTap: () => _sync.flushOfflineScans(),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isCompact ? 8 : 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _warningNeon.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: _warningNeon.withValues(alpha: 0.6)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.cloud_upload_rounded,
+                          color: _warningNeon,
+                          size: 13,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '$pendingCount',
+                          style: TextStyle(
+                            color: _warningNeon,
+                            fontSize: isCompact ? 11 : 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+
+              SizedBox(width: isCompact ? 4 : 8),
+
+              // Settings Icon
+              IconButton(
+                onPressed: _openSettingsDialog,
+                visualDensity: isCompact ? VisualDensity.compact : VisualDensity.standard,
+                icon: Icon(
+                  Icons.settings_rounded,
+                  color: Colors.white,
+                  size: isCompact ? 20 : 22,
+                ),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.black.withValues(alpha: 0.5),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomControls(bool isCompact) {
+    final btnPadding = EdgeInsets.symmetric(
+      horizontal: isCompact ? 13 : 16,
+      vertical: isCompact ? 9 : 11,
+    );
+    final labelStyle = TextStyle(fontSize: isCompact ? 12 : 13, fontWeight: FontWeight.w600);
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.fromLTRB(12, 8, 12, isCompact ? 12 : 18),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [Colors.black.withValues(alpha: 0.85), Colors.transparent],
+        ),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        spacing: isCompact ? 8 : 12,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed: () => _cameraController.switchCamera(),
+            icon: const Icon(Icons.cameraswitch_rounded, size: 17),
+            label: Text('Flip Camera', style: labelStyle),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: Colors.black.withValues(alpha: 0.65),
+              side: const BorderSide(color: Colors.white24),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              padding: btnPadding,
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => _cameraController.toggleTorch(),
+            icon: const Icon(Icons.flash_on_rounded, size: 17),
+            label: Text('Flashlight', style: labelStyle),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: Colors.black.withValues(alpha: 0.65),
+              side: const BorderSide(color: Colors.white24),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              padding: btnPadding,
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: _openManualAndRosterSheet,
+            icon: const Icon(Icons.fact_check_rounded, size: 17, color: _cyanNeon),
+            label: Text('Manual / Roster', style: labelStyle),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: Colors.black.withValues(alpha: 0.65),
+              side: BorderSide(color: _cyanNeon.withValues(alpha: 0.45)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              padding: btnPadding,
+            ),
+          ),
         ],
       ),
     );
@@ -493,86 +1042,129 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
       icon = Icons.help_outline_rounded;
     }
 
-    return Container(
-      color: Colors.black.withValues(alpha: 0.8),
-      alignment: Alignment.center,
-      padding: const EdgeInsets.all(24),
+    return GestureDetector(
+      onTap: _dismissResultModal,
       child: Container(
-        width: 380,
-        padding: const EdgeInsets.all(28),
-        decoration: BoxDecoration(
-          color: const Color(0xFF131922),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: themeColor.withValues(alpha: 0.6), width: 1.5),
-          boxShadow: [
-            BoxShadow(color: themeColor.withValues(alpha: 0.25), blurRadius: 40, spreadRadius: 4),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (res.visitorPhotoBytes != null) ...[
-              Container(
-                width: 96,
-                height: 96,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: _cyanNeon, width: 2.5),
-                  boxShadow: [
-                    BoxShadow(color: _cyanNeon.withValues(alpha: 0.35), blurRadius: 16),
-                  ],
-                ),
-                child: ClipOval(
-                  child: Image.memory(
-                    res.visitorPhotoBytes!,
-                    fit: BoxFit.cover,
+        color: Colors.black.withValues(alpha: 0.82),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.all(16),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final cardMaxW = math.min(constraints.maxWidth * 0.92, 400.0);
+            final isSmall = constraints.maxHeight < 420 || constraints.maxWidth < 360;
+
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: cardMaxW),
+                child: Container(
+                  padding: EdgeInsets.all(isSmall ? 18 : 26),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF131922),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: themeColor.withValues(alpha: 0.65),
+                      width: 1.5,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: themeColor.withValues(alpha: 0.25),
+                        blurRadius: 40,
+                        spreadRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (res.visitorPhotoBytes != null) ...[
+                        Container(
+                          width: isSmall ? 76 : 96,
+                          height: isSmall ? 76 : 96,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: _cyanNeon, width: 2.5),
+                            boxShadow: [
+                              BoxShadow(
+                                color: _cyanNeon.withValues(alpha: 0.35),
+                                blurRadius: 16,
+                              ),
+                            ],
+                          ),
+                          child: ClipOval(
+                            child: Image.memory(
+                              res.visitorPhotoBytes!,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                      ] else
+                        Icon(icon, color: themeColor, size: isSmall ? 50 : 64),
+                      SizedBox(height: isSmall ? 10 : 14),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: themeColor.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: themeColor.withValues(alpha: 0.4)),
+                        ),
+                        child: Text(
+                          bannerText,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: themeColor,
+                            fontWeight: FontWeight.w900,
+                            fontSize: isSmall ? 11 : 13,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: isSmall ? 10 : 14),
+                      if (!res.isOnline)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _warningNeon.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'Offline Check-in Queued (${_sync.pendingScansCount} pending)',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: _warningNeon,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      Text(
+                        res.memberName,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: isSmall ? 19 : 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '${res.plan}${res.expiryDate.isNotEmpty ? " • Valid: ${res.expiryDate}" : ""}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white60, fontSize: 13),
+                      ),
+                      SizedBox(height: isSmall ? 14 : 20),
+                      LinearProgressIndicator(
+                        backgroundColor: Colors.white10,
+                        color: themeColor,
+                        minHeight: 4,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ] else
-              Icon(icon, color: themeColor, size: 64),
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              decoration: BoxDecoration(
-                color: themeColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: themeColor.withValues(alpha: 0.4)),
-              ),
-              child: Text(
-                bannerText,
-                style: TextStyle(color: themeColor, fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1),
-              ),
-            ),
-            const SizedBox(height: 14),
-            if (!res.isOnline)
-              Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _warningNeon.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Text('Offline Check-in Saved Locally', style: TextStyle(color: _warningNeon, fontSize: 11, fontWeight: FontWeight.bold)),
-              ),
-            Text(
-              res.memberName,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '${res.plan} • ${res.expiryDate.isNotEmpty ? "Valid: ${res.expiryDate}" : ""}',
-              style: const TextStyle(color: Colors.white60, fontSize: 13),
-            ),
-            const SizedBox(height: 20),
-            LinearProgressIndicator(
-              backgroundColor: Colors.white10,
-              color: themeColor,
-              minHeight: 4,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -588,13 +1180,14 @@ class _ReticlePainter extends CustomPainter {
     final paint = Paint()
       ..color = color
       ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
-    const cornerLength = 32.0;
+    final cornerLength = (size.width * 0.12).clamp(18.0, 36.0);
 
     // Top Left
-    canvas.drawLine(const Offset(0, 0), const Offset(cornerLength, 0), paint);
-    canvas.drawLine(const Offset(0, 0), const Offset(0, cornerLength), paint);
+    canvas.drawLine(const Offset(0, 0), Offset(cornerLength, 0), paint);
+    canvas.drawLine(const Offset(0, 0), Offset(0, cornerLength), paint);
 
     // Top Right
     canvas.drawLine(Offset(size.width, 0), Offset(size.width - cornerLength, 0), paint);
@@ -605,8 +1198,10 @@ class _ReticlePainter extends CustomPainter {
     canvas.drawLine(Offset(0, size.height), Offset(0, size.height - cornerLength), paint);
 
     // Bottom Right
-    canvas.drawLine(Offset(size.width, size.height), Offset(size.width - cornerLength, size.height), paint);
-    canvas.drawLine(Offset(size.width, size.height), Offset(size.width, size.height - cornerLength), paint);
+    canvas.drawLine(
+        Offset(size.width, size.height), Offset(size.width - cornerLength, size.height), paint);
+    canvas.drawLine(
+        Offset(size.width, size.height), Offset(size.width, size.height - cornerLength), paint);
   }
 
   @override
