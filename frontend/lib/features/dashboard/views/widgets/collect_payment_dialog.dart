@@ -22,6 +22,7 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
   final _udhaarController = TextEditingController(text: '0');
 
   MemberModel? _selectedMember;
+  String _selectedPlan = 'Basic Plan';
   String _selectedMethod = 'Cash';
   bool _includePlanRenewal = true;
   bool _includeExtraFee = false;
@@ -33,25 +34,30 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
     super.initState();
     _selectedMethod = _settings.paymentMethods.first;
 
-    final membersList = MembersProvider.instance.allMembers.isNotEmpty
-        ? MembersProvider.instance.allMembers
-        : DummyData.members;
-
     if (widget.initialMember != null) {
       _selectedMember = widget.initialMember;
+      _selectedPlan = _matchPlanName(_selectedMember?.plan);
+      _configureForMember(_selectedMember);
     } else {
-      // Default to first member with pending payment, udhaar, or due status
-      final dueMembers = membersList
-          .where((m) => m.isPaymentPending || m.dueAmount > 0 || m.expiryDate.isBefore(DateTime.now()))
-          .toList();
-      if (dueMembers.isNotEmpty) {
-        _selectedMember = dueMembers.first;
-      } else if (membersList.isNotEmpty) {
-        _selectedMember = membersList.first;
+      // By default no user is selected
+      _selectedMember = null;
+      _selectedPlan = _settings.plans.isNotEmpty ? _settings.plans.first.name : 'Basic Plan';
+      _includePlanRenewal = true;
+      _includeExtraFee = false;
+    }
+  }
+
+  String _matchPlanName(String? rawPlan) {
+    if (rawPlan == null || rawPlan.isEmpty) {
+      return _settings.plans.isNotEmpty ? _settings.plans.first.name : 'Basic Plan';
+    }
+    final clean = rawPlan.trim().toLowerCase();
+    for (final p in _settings.plans) {
+      if (p.name.toLowerCase() == clean || p.id.toLowerCase() == clean) {
+        return p.name;
       }
     }
-
-    _configureForMember(_selectedMember);
+    return rawPlan;
   }
 
   void _configureForMember(MemberModel? m) {
@@ -77,10 +83,7 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
 
   double get _existingUdhaar => _selectedMember?.dueAmount ?? 0.0;
 
-  double get _planPrice {
-    if (_selectedMember == null) return 8000.0;
-    return _settings.getPlanPrice(_selectedMember!.plan);
-  }
+  double get _planPrice => _settings.getPlanPrice(_selectedPlan);
 
   double get _activePlanCharge => _includePlanRenewal ? _planPrice : 0.0;
 
@@ -117,6 +120,7 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
   void _onSelectMember(MemberModel member) {
     setState(() {
       _selectedMember = member;
+      _selectedPlan = _matchPlanName(member.plan);
       _isSearching = false;
       _searchController.clear();
       _searchQuery = '';
@@ -132,8 +136,8 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
     final formattedUdhaar = AppSettings.formatAmount(_remainingUdhaar);
     final hasDue = _remainingUdhaar > 0;
 
-    // Update member status and expiry in session data & SQLite database
-    final planDays = _settings.getPlanDurationDays(member.plan);
+    // Update member status, plan and expiry in session data & SQLite database
+    final planDays = _settings.getPlanDurationDays(_selectedPlan);
     final now = DateTime.now();
     final DateTime newExpiry = _includePlanRenewal
         ? (member.expiryDate.isBefore(now)
@@ -142,6 +146,7 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
         : member.expiryDate;
 
     final updated = member.copyWith(
+      plan: _selectedPlan,
       isPaymentPending: hasDue,
       dueAmount: _remainingUdhaar,
       paidAmount: member.paidAmount + _paidNowAmount,
@@ -149,7 +154,7 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
       expiryDate: newExpiry,
       notes: hasDue
           ? 'Paid Rs. $formattedPaid via $_selectedMethod • Remaining Udhaar: Rs. $formattedUdhaar'
-          : 'Fee Rs. $formattedPaid collected via $_selectedMethod on ${now.toString().split(' ')[0]}',
+          : 'Fee Rs. $formattedPaid collected for $_selectedPlan via $_selectedMethod on ${now.toString().split(' ')[0]}',
     );
 
     // Persist to SQLite & update shared state (ReceiptQrDialog will send the full Pass Card image)
@@ -367,9 +372,103 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                   ),
                 ],
 
-                // Selected Member Card
-                if (_selectedMember != null) ...[
-                  const SizedBox(height: 14),
+                // Selected Member Card OR Empty State
+                const SizedBox(height: 14),
+                if (_selectedMember != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.background,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 18,
+                                backgroundColor: AppColors.primary,
+                                child: Text(
+                                  _selectedMember!.name.isNotEmpty ? _selectedMember!.name[0] : 'M',
+                                  style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 15),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            _selectedMember!.name,
+                                            style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          '(${_selectedMember!.id})',
+                                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Current: ${_selectedMember!.plan} • ${_selectedMember!.phone ?? 'No phone'}',
+                                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            if (_selectedMember!.isPaymentPending || _selectedMember!.isExpired)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: AppColors.warning.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text('Fee Due', style: TextStyle(color: AppColors.warning, fontSize: 11, fontWeight: FontWeight.bold)),
+                              )
+                            else
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: AppColors.success.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text('Active', style: TextStyle(color: AppColors.success, fontSize: 11, fontWeight: FontWeight.bold)),
+                              ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.close_rounded, color: AppColors.textSecondary, size: 18),
+                              tooltip: 'Deselect member',
+                              onPressed: () {
+                                setState(() {
+                                  _selectedMember = null;
+                                  _includePlanRenewal = true;
+                                  _includeExtraFee = false;
+                                  _discountController.text = '0';
+                                  _udhaarController.text = '0';
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  )
+                else
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
@@ -378,69 +477,39 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                       border: Border.all(color: AppColors.border),
                     ),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 18,
-                              backgroundColor: AppColors.primary,
-                              child: Text(
-                                _selectedMember!.name.isNotEmpty ? _selectedMember!.name[0] : 'M',
-                                style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 15),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Text(
-                                      _selectedMember!.name,
-                                      style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      '(${_selectedMember!.id})',
-                                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  '${_selectedMember!.plan} • ${_selectedMember!.phone ?? 'No phone'}',
-                                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        if (_selectedMember!.isPaymentPending || _selectedMember!.isExpired)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: AppColors.warning.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text('Fee Due', style: TextStyle(color: AppColors.warning, fontSize: 11, fontWeight: FontWeight.bold)),
-                          )
-                        else
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: AppColors.success.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text('Active', style: TextStyle(color: AppColors.success, fontSize: 11, fontWeight: FontWeight.bold)),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
                           ),
+                          child: const Icon(Icons.person_search_rounded, color: AppColors.primary, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'No Member Selected',
+                                style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'Search or choose a member from the field above to collect payment.',
+                                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                ],
+
                 const SizedBox(height: 20),
 
-                // PRICING SECTION (Plan Price & Final Price)
+                // PRICING SECTION (Plan Choice, Calculation & Final Price)
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
@@ -467,7 +536,66 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Previous Pending Udhaar (if any)
+                      // Option to Choose / Change Plan
+                      Row(
+                        children: [
+                          const Icon(Icons.card_membership_rounded, color: AppColors.primary, size: 18),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Choose Plan:',
+                            style: TextStyle(color: AppColors.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.surface,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: AppColors.border),
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: _settings.plans.any((p) => p.name == _selectedPlan)
+                                      ? _selectedPlan
+                                      : (_settings.plans.isNotEmpty ? _settings.plans.first.name : null),
+                                  dropdownColor: AppColors.surface,
+                                  isExpanded: true,
+                                  icon: const Icon(Icons.keyboard_arrow_down_rounded, color: AppColors.primary),
+                                  items: _settings.plans.map((p) {
+                                    return DropdownMenuItem<String>(
+                                      value: p.name,
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            p.name,
+                                            style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
+                                          ),
+                                          Text(
+                                            'Rs. ${AppSettings.formatAmount(p.price)} (${p.durationDays}d)',
+                                            style: const TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.bold),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                  onChanged: (newPlan) {
+                                    if (newPlan != null) {
+                                      setState(() {
+                                        _selectedPlan = newPlan;
+                                      });
+                                    }
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Previous Pending Udhaar (if member has existing balance)
                       if (_existingUdhaar > 0) ...[
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -525,7 +653,7 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                'Renew ${_selectedMember?.plan ?? 'Standard'} (+${_settings.getPlanDurationDays(_selectedMember?.plan ?? 'Basic')}d)',
+                                'Renew $_selectedPlan (+${_settings.getPlanDurationDays(_selectedPlan)}d)',
                                 style: const TextStyle(color: AppColors.textPrimary, fontSize: 13.5, fontWeight: FontWeight.w500),
                               ),
                             ],
@@ -736,7 +864,9 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                                     Text(
                                       _remainingUdhaar > 0
                                           ? 'Total Bill: Rs. ${AppSettings.formatAmount(_finalPrice)} • Remaining Udhaar: Rs. ${AppSettings.formatAmount(_remainingUdhaar)}'
-                                          : 'All dues cleared on payment',
+                                          : (_selectedMember == null
+                                              ? 'Select a member to finalize payment'
+                                              : 'All dues cleared on payment'),
                                       style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
                                     ),
                                   ],
@@ -803,11 +933,12 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                     ),
                     const SizedBox(width: 12),
                     ElevatedButton.icon(
-                      onPressed: _submitPayment,
+                      onPressed: _selectedMember == null ? null : _submitPayment,
                       icon: const Icon(Icons.check_circle_outline, color: Colors.black, size: 18),
                       label: const Text('Confirm Payment', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
+                        disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.3),
                         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
