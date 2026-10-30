@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:gym_system/core/constants/app_settings.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/core/services/api_service.dart';
@@ -26,7 +28,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _sendPaymentReceipt = AppSettings.instance.sendPaymentReceipt;
   bool _sendWelcomeMessage = AppSettings.instance.sendWelcomeMessage;
   final TextEditingController _testPhoneController = TextEditingController(text: '+92 300 1234567');
+  final TextEditingController _welcomeTemplateCtrl = TextEditingController(text: AppSettings.instance.templateWelcome);
+  final TextEditingController _dueTemplateCtrl = TextEditingController(text: AppSettings.instance.templateDue);
+  final TextEditingController _expiredTemplateCtrl = TextEditingController(text: AppSettings.instance.templateExpired);
+  final TextEditingController _receiptTemplateCtrl = TextEditingController(text: AppSettings.instance.templateReceipt);
+  bool _savingTemplates = false;
   Map<String, dynamic>? _realWaStatus;
+
+  // Tablet Kiosk & Network Discovery
+  Map<String, dynamic>? _networkInfo;
+  List<Map<String, dynamic>> _tabletDevices = [];
+  bool _loadingTabletData = false;
 
   @override
   void initState() {
@@ -47,7 +59,82 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _sendExpiryAlert = _settings.sendExpiryAlert;
     _sendPaymentReceipt = _settings.sendPaymentReceipt;
     _sendWelcomeMessage = _settings.sendWelcomeMessage;
+    _welcomeTemplateCtrl.text = _settings.templateWelcome;
+    _dueTemplateCtrl.text = _settings.templateDue;
+    _expiredTemplateCtrl.text = _settings.templateExpired;
+    _receiptTemplateCtrl.text = _settings.templateReceipt;
     _loadRealWaStatus();
+    _loadWaTemplatesFromServer();
+    _loadTabletData();
+  }
+
+  Future<void> _loadWaTemplatesFromServer() async {
+    try {
+      final serverSettings = await ApiService.instance.getWhatsAppSettings();
+      if (serverSettings != null && mounted) {
+        setState(() {
+          if (serverSettings['template_welcome'] != null && serverSettings['template_welcome'].toString().isNotEmpty) {
+            _settings.templateWelcome = serverSettings['template_welcome'].toString();
+            _welcomeTemplateCtrl.text = _settings.templateWelcome;
+          }
+          if (serverSettings['template_due'] != null && serverSettings['template_due'].toString().isNotEmpty) {
+            _settings.templateDue = serverSettings['template_due'].toString();
+            _dueTemplateCtrl.text = _settings.templateDue;
+          }
+          if (serverSettings['template_expired'] != null && serverSettings['template_expired'].toString().isNotEmpty) {
+            _settings.templateExpired = serverSettings['template_expired'].toString();
+            _expiredTemplateCtrl.text = _settings.templateExpired;
+          }
+          if (serverSettings['template_receipt'] != null && serverSettings['template_receipt'].toString().isNotEmpty) {
+            _settings.templateReceipt = serverSettings['template_receipt'].toString();
+            _receiptTemplateCtrl.text = _settings.templateReceipt;
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveWaTemplates() async {
+    setState(() => _savingTemplates = true);
+    _settings.templateWelcome = _welcomeTemplateCtrl.text.trim();
+    _settings.templateDue = _dueTemplateCtrl.text.trim();
+    _settings.templateExpired = _expiredTemplateCtrl.text.trim();
+    _settings.templateReceipt = _receiptTemplateCtrl.text.trim();
+
+    final ok = await ApiService.instance.updateWhatsAppSettings({
+      'template_welcome': _settings.templateWelcome,
+      'template_due': _settings.templateDue,
+      'template_expired': _settings.templateExpired,
+      'template_receipt': _settings.templateReceipt,
+      'enable_welcome_msg': _sendWelcomeMessage.toString(),
+      'enable_expiry_alerts': _sendExpiryAlert.toString(),
+      'enable_payment_receipts': _sendPaymentReceipt.toString(),
+    });
+
+    if (mounted) {
+      setState(() => _savingTemplates = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ok
+                ? 'WhatsApp message templates saved and synced with server!'
+                : 'Templates saved locally (server offline).',
+          ),
+          backgroundColor: ok ? AppColors.success : AppColors.warning,
+        ),
+      );
+    }
+  }
+
+  void _resetWaTemplates() {
+    setState(() {
+      _settings.resetTemplatesToDefault();
+      _welcomeTemplateCtrl.text = _settings.templateWelcome;
+      _dueTemplateCtrl.text = _settings.templateDue;
+      _expiredTemplateCtrl.text = _settings.templateExpired;
+      _receiptTemplateCtrl.text = _settings.templateReceipt;
+    });
+    _saveWaTemplates();
   }
 
   Future<void> _loadRealWaStatus() async {
@@ -57,10 +144,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _loadTabletData() async {
+    setState(() => _loadingTabletData = true);
+    try {
+      final info = await ApiService.instance.getNetworkInfo();
+      final devices = await ApiService.instance.getTabletDevices();
+      if (mounted) {
+        setState(() {
+          _networkInfo = info;
+          _tabletDevices = devices;
+          _loadingTabletData = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingTabletData = false);
+    }
+  }
+
+  Future<void> _triggerTabletSync() async {
+    final success = await ApiService.instance.triggerTabletSync();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(success ? 'Signal sent! All tablets are now syncing the latest member roster.' : 'Could not reach server hub.'),
+          backgroundColor: success ? AppColors.success : AppColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openTabletInBrowser() async {
+    final url = _networkInfo?['tabletUrl'] ?? 'http://localhost:5000/tablet';
+    try {
+      if (Platform.isWindows) {
+        await Process.run('cmd', ['/c', 'start', url]);
+      } else if (Platform.isMacOS) {
+        await Process.run('open', [url]);
+      } else if (Platform.isLinux) {
+        await Process.run('xdg-open', [url]);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Open manually in tablet browser: $url')),
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
     _joiningFeeController.dispose();
     _testPhoneController.dispose();
+    _welcomeTemplateCtrl.dispose();
+    _dueTemplateCtrl.dispose();
+    _expiredTemplateCtrl.dispose();
+    _receiptTemplateCtrl.dispose();
     super.dispose();
   }
 
@@ -891,13 +1030,115 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const Divider(color: AppColors.border, height: 24),
                       _buildToggleRow(
                         icon: Icons.celebration_rounded,
-                        title: 'Send Welcome Message on Registration',
-                        description: 'Send gym timings, facility guidelines, and check-in QR code immediately upon new member enrollment.',
+                        title: 'Send Welcome Message & Digital Pass on Registration',
+                        description: 'Send full scannable Digital Membership Pass image & welcome caption immediately upon new member enrollment.',
                         value: _sendWelcomeMessage,
                         onChanged: (v) {
                           setState(() => _sendWelcomeMessage = v);
                           _settings.sendWelcomeMessage = v;
                         },
+                      ),
+                      const Divider(color: AppColors.border, height: 28),
+
+                      // Custom Message Templates Editor
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Customize Automated Message Templates',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'Available placeholders: {name}, {plan}, {expiry_date}, {id}, {amount}, {method}, {gym_name}',
+                                style: TextStyle(fontSize: 11, color: AppColors.primary),
+                              ),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              TextButton.icon(
+                                onPressed: _resetWaTemplates,
+                                icon: const Icon(Icons.restore_rounded, size: 15),
+                                label: const Text('Reset Defaults', style: TextStyle(fontSize: 12)),
+                                style: TextButton.styleFrom(foregroundColor: AppColors.textSecondary),
+                              ),
+                              const SizedBox(width: 8),
+                              ElevatedButton.icon(
+                                onPressed: _savingTemplates ? null : _saveWaTemplates,
+                                icon: _savingTemplates
+                                    ? const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                                      )
+                                    : const Icon(Icons.save_rounded, size: 15),
+                                label: Text(
+                                  _savingTemplates ? 'Saving...' : 'Save Templates',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: Colors.black,
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: _buildTemplateField(
+                              icon: Icons.badge_rounded,
+                              title: '1. Welcome & Digital Pass Caption (New Member)',
+                              hint: 'Sent with the full QR Digital Membership Pass image',
+                              controller: _welcomeTemplateCtrl,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: _buildTemplateField(
+                              icon: Icons.notifications_active_rounded,
+                              title: '2. Upcoming Expiry / Due Reminder',
+                              hint: 'Sent when membership is expiring within 5 days',
+                              controller: _dueTemplateCtrl,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: _buildTemplateField(
+                              icon: Icons.warning_amber_rounded,
+                              title: '3. Expired Membership Alert',
+                              hint: 'Sent when membership has already expired',
+                              controller: _expiredTemplateCtrl,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: _buildTemplateField(
+                              icon: Icons.receipt_long_rounded,
+                              title: '4. Payment / Renewal Receipt',
+                              hint: 'Sent after collecting fee or renewing membership',
+                              controller: _receiptTemplateCtrl,
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 18),
 
@@ -947,6 +1188,245 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ],
                         ),
                       ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // 3. Tablet Kiosk & Camera Scanner Hub Card
+                _buildSectionCard(
+                  icon: Icons.tablet_mac_rounded,
+                  title: 'Tablet Kiosk & Camera QR Scanner Hub',
+                  subtitle: 'Connect entrance tablets for automated attendance check-ins with real-time offline sync',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Network Address & Direct URL Banner
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceLight,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Left: Setup QR Code
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: (_networkInfo != null && _networkInfo!['tabletUrl'] != null)
+                                  ? QrImageView(
+                                      data: jsonEncode({
+                                        'serverUrl': _networkInfo!['baseUrl'],
+                                        'tabletUrl': _networkInfo!['tabletUrl'],
+                                        'wsUrl': _networkInfo!['wsUrl'],
+                                        'primaryIp': _networkInfo!['primaryIp'],
+                                        'gymName': 'Titan Gym',
+                                      }),
+                                      version: QrVersions.auto,
+                                      size: 150,
+                                      backgroundColor: Colors.white,
+                                    )
+                                  : const SizedBox(
+                                      width: 150,
+                                      height: 150,
+                                      child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                                    ),
+                            ),
+                            const SizedBox(width: 20),
+
+                            // Right: Setup Instructions & Launch Actions
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.primary.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                                        ),
+                                        child: Text(
+                                          'Tablet Kiosk URL: ${_networkInfo?['tabletUrl'] ?? 'http://localhost:5000/tablet'}',
+                                          style: const TextStyle(
+                                            color: AppColors.primary,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  const Text(
+                                    'How to connect any Tablet (iPad, Android, Samsung, Fire HD):',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  const Text(
+                                    '1. Connect your tablet and this PC to the SAME Wi-Fi or hotspot.\n'
+                                    '2. On the tablet, point the camera at this QR code or open the link above in Chrome/Safari.\n'
+                                    '3. Once open, tap "Fullscreen" or "Add to Home Screen" to run as a dedicated kiosk!\n'
+                                    '4. New members added on this PC are instantly pushed to the tablet for offline scanning.',
+                                    style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.45),
+                                  ),
+                                  const SizedBox(height: 14),
+
+                                  // Quick Action Buttons
+                                  Wrap(
+                                    spacing: 10,
+                                    runSpacing: 10,
+                                    children: [
+                                      ElevatedButton.icon(
+                                        onPressed: _openTabletInBrowser,
+                                        icon: const Icon(Icons.open_in_browser_rounded, size: 16),
+                                        label: const Text('Launch Kiosk in Browser'),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: AppColors.primary,
+                                          foregroundColor: Colors.black,
+                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                        ),
+                                      ),
+                                      OutlinedButton.icon(
+                                        onPressed: _triggerTabletSync,
+                                        icon: const Icon(Icons.sync_rounded, size: 16),
+                                        label: const Text('Push Members to Tablets Now'),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: AppColors.primary,
+                                          side: const BorderSide(color: AppColors.primary, width: 0.8),
+                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        onPressed: _loadingTabletData ? null : _loadTabletData,
+                                        icon: _loadingTabletData
+                                            ? const SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child: CircularProgressIndicator(strokeWidth: 2),
+                                              )
+                                            : const Icon(Icons.refresh_rounded, size: 18),
+                                        tooltip: 'Refresh connected tablets',
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+
+                      // Connected Tablets Registry
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Connected Tablet Devices (Live Registry)',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.textPrimary),
+                          ),
+                          Text(
+                            '${_tabletDevices.length} Active Kiosk${_tabletDevices.length == 1 ? '' : 's'}',
+                            style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+
+                      if (_tabletDevices.isEmpty)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: const Center(
+                            child: Text(
+                              'No tablet kiosks connected yet. Open the link or scan the QR code to pair your first tablet.',
+                              style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                            ),
+                          ),
+                        )
+                      else
+                        ListView.separated(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _tabletDevices.length,
+                          separatorBuilder: (ctx, i) => const SizedBox(height: 8),
+                          itemBuilder: (ctx, idx) {
+                            final dev = _tabletDevices[idx];
+                            final num? battery = dev['battery_level'] is num ? (dev['battery_level'] as num) : null;
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceLight,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: AppColors.border),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.tablet_android_rounded, color: AppColors.primary, size: 22),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          dev['device_name'] ?? 'Tablet Kiosk',
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'IP: ${dev['ip_address'] ?? 'Local'} • Version: ${dev['app_version'] ?? '2.0.0'} • Total Scans: ${dev['total_scans'] ?? 0}',
+                                          style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (battery != null) ...[
+                                    Icon(
+                                      battery > 20 ? Icons.battery_charging_full_rounded : Icons.battery_alert_rounded,
+                                      color: battery > 20 ? AppColors.success : AppColors.warning,
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '${battery.toInt()}%',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: battery > 20 ? AppColors.success : AppColors.warning,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                  ],
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.success.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Text(
+                                      'ONLINE',
+                                      style: TextStyle(color: AppColors.success, fontSize: 10, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
                     ],
                   ),
                 ),
@@ -1068,6 +1548,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onChanged: onChanged,
         ),
       ],
+    );
+  }
+
+  Widget _buildTemplateField({
+    required IconData icon,
+    required String title,
+    required String hint,
+    required TextEditingController controller,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceLight,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 15, color: AppColors.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Text(
+            hint,
+            style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: controller,
+            maxLines: 4,
+            style: const TextStyle(fontSize: 12, height: 1.35),
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: AppColors.background,
+              contentPadding: const EdgeInsets.all(10),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: AppColors.border),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: AppColors.border),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

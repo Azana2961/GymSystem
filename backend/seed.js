@@ -19,7 +19,7 @@ const INITIAL_MEMBERS = [
     phone: '+92 321 4589211',
     email: 'ayesha.khan@gmail.com',
     plan: 'Silver Plan',
-    expiryDays: 4, // Due soon (< 5 days)
+    expiryDays: 4, // Due soon (< 5 days)     
     status: 'due',
     gender: 'Female',
     notes: 'Card expiring soon'

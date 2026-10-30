@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { WebSocketServer } = require('ws');
@@ -27,6 +28,13 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Explicit Tablet Kiosk App routes (served from root /tablet directory)
+const tabletDir = path.join(__dirname, '..', 'tablet');
+app.get(['/tablet', '/tablet/', '/kiosk'], (req, res) => {
+  res.sendFile(path.join(tabletDir, 'index.html'));
+});
+app.use('/tablet', express.static(tabletDir));
+
 app.use('/qrcodes', express.static(QR_DIR));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -55,6 +63,11 @@ function broadcast(eventType, data) {
       res.write(`data: ${payload}\n\n`);
     } catch (err) {}
   });
+
+  // 3. Auto-trigger WhatsApp queue worker when Real WhatsApp connects
+  if (eventType === 'whatsapp:real:connected') {
+    setTimeout(() => whatsappService.startWorker(), 1000);
+  }
 }
 
 // Wire WhatsApp services real-time broadcaster
@@ -144,7 +157,7 @@ app.get('/api/ping', (req, res) => {
   const ips = getLocalIpAddresses();
   res.json({
     success: true,
-    message: 'Titan Gym Backend is online & reachable',
+    message: 'Lá Fitness Backend is online & reachable',
     serverTime: new Date().toISOString(),
     primaryIp: ips[0] || '127.0.0.1',
     port: PORT,
@@ -159,12 +172,14 @@ app.get('/api/network/info', async (req, res) => {
     const baseUrl = `http://${primaryIp}:${PORT}`;
 
     // Generate a QR Code encoding the Tablet Auto-Connect payload
+    const tabletUrl = `${baseUrl}/tablet`;
     const connectPayload = JSON.stringify({
       serverUrl: baseUrl,
+      tabletUrl,
       primaryIp,
       port: PORT,
       wsUrl: `ws://${primaryIp}:${PORT}/ws`,
-      gymName: whatsappService.getSettings().gym_name || 'Titan Gym',
+      gymName: whatsappService.getSettings().gym_name || 'Lá Fitness',
     });
 
     const qrDataUrl = await QRCode.toDataURL(connectPayload, {
@@ -180,6 +195,7 @@ app.get('/api/network/info', async (req, res) => {
       primaryIp,
       allIps: ips,
       baseUrl,
+      tabletUrl,
       pingUrl: `${baseUrl}/api/ping`,
       syncUrl: `${baseUrl}/api/members/sync`,
       scanUrl: `${baseUrl}/api/attendance/scan`,
@@ -189,8 +205,9 @@ app.get('/api/network/info', async (req, res) => {
       instructions: [
         '1. Connect your Tablet and Laptop to the SAME Wi-Fi or hotspot network.',
         `2. In the Tablet Kiosk Settings, enter Host IP / Base URL: ${baseUrl}`,
-        '3. Alternatively, scan the generated setup QR Code on screen with the tablet camera to configure automatically.',
-        '4. Tap "Test Connection" on the tablet to verify reachability.',
+        `3. Alternatively, open ${tabletUrl} on your tablet browser directly!`,
+        '4. Or scan this setup QR Code on screen with the tablet camera to configure automatically.',
+        '5. Tap "Test Connection" on the tablet to verify reachability.',
       ],
     });
   } catch (err) {
@@ -203,7 +220,7 @@ app.get('/api/tablet/config', (req, res) => {
   const ips = getLocalIpAddresses();
   res.json({
     success: true,
-    gymName: whatsappService.getSettings().gym_name || 'Titan Gym',
+    gymName: whatsappService.getSettings().gym_name || 'Lá Fitness',
     serverTime: new Date().toISOString(),
     primaryIp: ips[0] || '127.0.0.1',
     autoSyncIntervalSec: 300,
@@ -248,14 +265,25 @@ app.get('/api/tablet/devices', (req, res) => {
   res.json({ success: true, devices });
 });
 
+// Force all connected tablets to re-sync members roster
+app.post('/api/tablet/broadcast-sync', (req, res) => {
+  const members = db.getAllMembers();
+  broadcast('sync:force', { count: members.length, timestamp: new Date().toISOString() });
+  res.json({ success: true, message: 'Broadcasted sync signal to all connected tablets', count: members.length });
+});
+
 // ── 1. Tablet Member Sync: GET /api/members/sync ──────────────────────────
 app.get('/api/members/sync', (req, res) => {
   try {
     const all = db.getAllMembers();
     // Exact schema expected by TabletApp's Member.fromJson
     const members = all.map((m) => {
-      let status = m.status;
-      if (new Date(m.expiry_date) < new Date()) {
+      const isVis =
+        m.status === 'visitor' ||
+        String(m.qr_token || '').toUpperCase().startsWith('VIS-') ||
+        String(m.plan || '').toLowerCase().includes('visitor');
+      let status = isVis ? 'visitor' : m.status;
+      if (!isVis && new Date(m.expiry_date) < new Date()) {
         status = 'expired';
       }
       return {
@@ -286,7 +314,7 @@ app.get('/api/members/sync', (req, res) => {
 // ── 2. Attendance Scan: POST /api/attendance/scan ────────────────────────
 app.post('/api/attendance/scan', (req, res) => {
   try {
-    const { qr_token, scanned_at, device_id } = req.body;
+    const { qr_token, scanned_at, device_id, visitor_photo_base64, visitor_photo } = req.body;
     if (!qr_token) {
       return res.status(400).json({ success: false, message: 'qr_token is required' });
     }
@@ -301,12 +329,39 @@ app.post('/api/attendance/scan', (req, res) => {
       });
     }
 
-    // Determine current status
-    let status = member.status;
+    // Determine current status (including 'visitor')
+    const isVisitorMember =
+      member.status === 'visitor' ||
+      String(member.qr_token || '').toUpperCase().startsWith('VIS-') ||
+      String(qr_token).toUpperCase().startsWith('VIS-') ||
+      String(member.plan || '').toLowerCase().includes('visitor');
+
+    let status = isVisitorMember ? 'visitor' : member.status;
     const now = new Date();
     const expiry = new Date(member.expiry_date);
-    if (expiry < now) {
-      status = 'expired';
+    if (!isVisitorMember) {
+      if (expiry < now) {
+        status = 'expired';
+      } else if (status !== 'due') {
+        const daysLeft = Math.ceil((expiry - now) / 86400000);
+        if (daysLeft <= 5) {
+          status = 'due';
+        }
+      }
+    }
+
+    // Save visitor camera snapshot if provided
+    let savedPhotoUrl = visitor_photo || null;
+    if (visitor_photo_base64) {
+      try {
+        const cleanB64 = String(visitor_photo_base64).replace(/^data:image\/\w+;base64,/, '');
+        const fileName = `VISITOR-${member.id}-${Date.now()}.jpg`;
+        const filePath = path.join(QR_DIR, fileName);
+        fs.writeFileSync(filePath, Buffer.from(cleanB64, 'base64'));
+        savedPhotoUrl = `/qrcodes/${fileName}`;
+      } catch (photoErr) {
+        console.warn('[ATTENDANCE] Failed to save visitor photo:', photoErr.message);
+      }
     }
 
     // Save attendance entry to SQLite
@@ -315,6 +370,7 @@ app.post('/api/attendance/scan', (req, res) => {
       qr_token: member.qr_token,
       member_name: member.name,
       status: status,
+      visitor_photo: savedPhotoUrl,
       scanned_at: timestamp,
     });
 
@@ -326,11 +382,12 @@ app.post('/api/attendance/scan', (req, res) => {
       status: status,
       plan: member.plan,
       phone: member.phone,
+      visitor_photo: savedPhotoUrl,
       scanned_at: timestamp,
       device_id: device_id || 'tablet',
     };
 
-    console.log(`[ATTENDANCE] Checked in: ${member.name} (${status.toUpperCase()}) at ${timestamp}`);
+    console.log(`[ATTENDANCE] Checked in: ${member.name} (${status.toUpperCase()})${savedPhotoUrl ? ' [PHOTO CAPTURED]' : ''} at ${timestamp}`);
 
     // Broadcast attendance in real time to the laptop dashboard
     broadcast('attendance:new', attendanceRecord);
@@ -339,6 +396,8 @@ app.post('/api/attendance/scan', (req, res) => {
       success: true,
       message: `Welcome, ${member.name}!`,
       status: status,
+      is_visitor: isVisitorMember,
+      visitor_photo: savedPhotoUrl,
       member: {
         id: member.id,
         name: member.name,
@@ -383,14 +442,17 @@ app.post('/api/attendance/batch', (req, res) => {
 // ── 3. Member Registration: POST /api/members/register ────────────────────
 app.post('/api/members/register', async (req, res) => {
   try {
-    const { name, phone, plan, expiry_date, status, email, gender, notes, send_welcome } = req.body;
+    const { id, qr_token, name, phone, plan, expiry_date, status, email, gender, notes, send_welcome, image_base64 } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, message: 'Member name is required' });
     }
 
-    const memberId = 'M' + Date.now().toString().slice(-6);
-    const qrToken = generateQrToken('GYM');
+    const isVisitorReg =
+      status === 'visitor' ||
+      String(plan || '').toLowerCase().includes('visitor');
+    const memberId = (id && String(id).trim()) || ((isVisitorReg ? 'V' : 'M') + Date.now().toString().slice(-6));
+    const qrToken = (qr_token && String(qr_token).trim()) || generateQrToken(isVisitorReg ? 'VIS' : 'GYM');
 
     // Generate physical PNG and DataURL
     const { url, dataUrl } = await generateAndSaveQr(qrToken);
@@ -421,7 +483,7 @@ app.post('/api/members/register', async (req, res) => {
     let whatsappQueued = null;
     if (newMember.phone && send_welcome !== false) {
       try {
-        whatsappQueued = whatsappService.sendWelcomeMessage(newMember);
+        whatsappQueued = whatsappService.sendWelcomeMessage(newMember, image_base64 || null);
       } catch (waErr) {
         console.warn('[WhatsApp] Welcome queue skipped:', waErr.message);
       }
@@ -600,19 +662,21 @@ app.get('/api/whatsapp/logs', (req, res) => {
   });
 });
 
-// Enqueue a single message with random anti-ban delay
+// Enqueue a single message (or standalone Pass Card image) with random anti-ban delay
 app.post('/api/whatsapp/send', (req, res) => {
   try {
-    const { member_id, phone, text, type } = req.body;
-    if (!phone || !text) {
-      return res.status(400).json({ success: false, message: 'phone and text are required' });
+    const { member_id, phone, text, type, image_base64, image_path } = req.body;
+    if (!phone || (!text && !image_base64 && !image_path)) {
+      return res.status(400).json({ success: false, message: 'phone and either text or image are required' });
     }
 
     const item = whatsappService.enqueue({
       member_id: member_id || null,
       recipient_phone: phone,
-      message_text: text,
+      message_text: text || '',
       message_type: type || 'custom',
+      image_base64: image_base64 || null,
+      image_path: image_path || null,
     });
 
     res.json({

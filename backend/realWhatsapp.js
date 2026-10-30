@@ -3,6 +3,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  DEFAULT_CONNECTION_CONFIG,
   delay,
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
@@ -10,6 +11,53 @@ const QRCode = require('qrcode');
 const qrcodeTerminal = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
+const dns = require('dns');
+
+// Force IPv4 first and add DNS fallback for web.whatsapp.com when Windows/Emulator DNS blips
+try {
+  if (typeof dns.setDefaultResultOrder === 'function') {
+    dns.setDefaultResultOrder('ipv4first');
+  }
+} catch (_) {}
+
+const publicResolver = new dns.Resolver();
+try {
+  publicResolver.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+} catch (_) {}
+
+const dnsCache = new Map([
+  ['web.whatsapp.com', '57.144.149.32'],
+]);
+
+const originalLookup = dns.lookup.bind(dns);
+dns.lookup = function (hostname, options, callback) {
+  let cb = callback;
+  let opts = options;
+  if (typeof options === 'function') {
+    cb = options;
+    opts = {};
+  }
+  return originalLookup(hostname, opts, (err, address, family) => {
+    if (!err && address) {
+      if (typeof address === 'string') {
+        dnsCache.set(hostname, address);
+      }
+      return cb(null, address, family);
+    }
+    // Fallback to public DNS (8.8.8.8 / 1.1.1.1) if OS getaddrinfo fails with ENOTFOUND
+    publicResolver.resolve4(hostname, (resolveErr, addresses) => {
+      const ip = (!resolveErr && addresses && addresses[0]) || dnsCache.get(hostname);
+      if (ip) {
+        dnsCache.set(hostname, ip);
+        if (opts && opts.all) {
+          return cb(null, [{ address: ip, family: 4 }]);
+        }
+        return cb(null, ip, 4);
+      }
+      return cb(err, address, family);
+    });
+  });
+};
 
 /**
  * Real WhatsApp Web Connection Manager using Baileys Multi-Device Socket
@@ -36,7 +84,7 @@ class RealWhatsAppManager {
     this.isInitializing = false;
     this.reconnectTimer = null;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 10;
+    this.maxReconnectAttempts = 50;
 
     // Ensure session directory exists
     if (!fs.existsSync(this.authDir)) {
@@ -97,6 +145,17 @@ class RealWhatsAppManager {
     this.status = 'connecting';
     this.lastError = null;
 
+    // Cleanly close any lingering previous socket before re-initializing
+    if (this.sock) {
+      try {
+        this.sock.ev.removeAllListeners();
+        if (this.sock.ws && typeof this.sock.ws.close === 'function') {
+          this.sock.ws.close();
+        }
+      } catch (_) {}
+      this.sock = null;
+    }
+
     console.log('[Real WhatsApp] Initializing multi-device connection...');
     this.broadcast('whatsapp:real:status', { status: 'connecting' });
 
@@ -104,14 +163,18 @@ class RealWhatsAppManager {
       // 1. Load multi-file auth credentials
       const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
 
-      // 2. Fetch latest WhatsApp Web version
-      let version;
+      // 2. Fetch latest WhatsApp Web version (with fast fallback to built-in Baileys version)
+      let version = (DEFAULT_CONNECTION_CONFIG && DEFAULT_CONNECTION_CONFIG.version) || [2, 3000, 1043857760];
       try {
-        const versionInfo = await fetchLatestBaileysVersion();
-        version = versionInfo.version;
-      } catch (err) {
-        // Fallback version if offline or registry timeout
-        version = [2, 3000, 1015901307];
+        const versionInfo = await Promise.race([
+          fetchLatestBaileysVersion(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3500)),
+        ]);
+        if (versionInfo && versionInfo.version) {
+          version = versionInfo.version;
+        }
+      } catch (_) {
+        // Keep up-to-date built-in version
       }
 
       // 3. Create Baileys Socket
@@ -122,9 +185,11 @@ class RealWhatsAppManager {
         auth: state,
         browser: ['Titan Gym System', 'Chrome', '124.0.0.0'],
         connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 30000,
+        keepAliveIntervalMs: 20000,
         defaultQueryTimeoutMs: 60000,
-        generateHighQualityLinkPreview: true,
+        retryRequestDelayMs: 2000,
+        markOnlineOnConnect: false,
+        generateHighQualityLinkPreview: false,
         syncFullHistory: false,
       });
 
@@ -286,10 +351,40 @@ class RealWhatsAppManager {
   }
 
   /**
-   * Sends a real WhatsApp message to an international phone number
+   * Waits for an active WhatsApp socket connection (e.g. if reconnecting after a brief network blip)
+   */
+  async waitForConnection(timeoutMs = 25000) {
+    if (this.status === 'connected' && this.sock) return true;
+    if (!this.hasStoredSession() && this.status === 'qr_ready') return false;
+
+    if (this.status === 'disconnected' && !this.isInitializing) {
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      this.init();
+    }
+
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (this.status === 'connected' && this.sock) return true;
+      await delay(500);
+    }
+    return this.status === 'connected' && !!this.sock;
+  }
+
+  /**
+   * Sends a real WhatsApp message (or Image + Caption) to an international phone number
    * Includes human typing simulation and recipient existence verification.
    */
-  async sendRealMessage(phone, messageText) {
+  async sendRealMessage(phone, messageText, options = {}) {
+    if (this.status !== 'connected' || !this.sock) {
+      if (this.hasStoredSession()) {
+        console.log('[Real WhatsApp] Waiting for active session reconnection before sending message...');
+        await this.waitForConnection(25000);
+      }
+    }
+
     if (this.status !== 'connected' || !this.sock) {
       throw new Error(
         'Real WhatsApp Web is NOT connected. Please link your phone by scanning the QR code in the Gym Control Center.'
@@ -329,7 +424,8 @@ class RealWhatsAppManager {
       } catch (_) {}
 
       // 3. Human typing delay based on message length (1.2s - 2.8s)
-      const typingTime = Math.min(2800, Math.max(1200, messageText.length * 20));
+      const textLen = (messageText || '').length;
+      const typingTime = Math.min(2800, Math.max(1200, textLen * 20));
       await delay(typingTime);
 
       // 4. Send 'paused' typing indicator
@@ -337,12 +433,68 @@ class RealWhatsAppManager {
         await this.sock.sendPresenceUpdate('paused', targetJid);
       } catch (_) {}
 
-      // 5. Send actual message over WhatsApp socket
-      const sent = await this.sock.sendMessage(targetJid, {
-        text: messageText,
-      });
+      // 5. Resolve optional image attachment (Full Member Pass Card PNG or QR Code PNG)
+      let imageBuffer = options.imageBuffer || null;
+      if (!imageBuffer && options.imagePath) {
+        try {
+          const publicCandidate = path.join(
+            __dirname,
+            'public',
+            String(options.imagePath).replace(/^[/\\]+/, '')
+          );
+          if (fs.existsSync(publicCandidate)) {
+            imageBuffer = fs.readFileSync(publicCandidate);
+          } else if (fs.existsSync(options.imagePath)) {
+            imageBuffer = fs.readFileSync(options.imagePath);
+          } else {
+            console.warn('[Real WhatsApp] Image file not found on disk:', publicCandidate);
+          }
+        } catch (imgErr) {
+          console.warn('[Real WhatsApp] Could not read image attachment:', imgErr.message);
+        }
+      }
 
-      console.log(`[Real WhatsApp] Message successfully delivered to +${clean} (ID: ${sent?.key?.id})`);
+      // 6. Send actual message (Standalone Pass Image OR Text) over WhatsApp socket
+      let sent;
+      if (imageBuffer) {
+        let finalBuffer = imageBuffer;
+        let finalMime = 'image/jpeg';
+
+        try {
+          const sharpMod = await import('sharp');
+          const sharpFn = sharpMod.default || sharpMod;
+          if (typeof sharpFn === 'function') {
+            finalBuffer = await sharpFn(imageBuffer)
+              .flatten({ background: '#0F0F13' })
+              .jpeg({ quality: 92 })
+              .toBuffer();
+            finalMime = 'image/jpeg';
+          }
+        } catch (sharpErr) {
+          console.warn('[Real WhatsApp] Sharp conversion fallback to raw buffer:', sharpErr.message);
+          finalMime = 'image/png';
+        }
+
+        const mediaPayload = {
+          image: finalBuffer,
+          mimetype: finalMime,
+        };
+        // Only attach caption if non-empty text was explicitly provided
+        if (messageText && messageText.trim().length > 0) {
+          mediaPayload.caption = messageText.trim();
+        }
+
+        sent = await this.sock.sendMessage(targetJid, mediaPayload);
+        console.log(`[Real WhatsApp] Standalone Pass Image (${finalMime}, ${finalBuffer.length} bytes) delivered to +${clean} (ID: ${sent?.key?.id})`);
+      } else {
+        if (!messageText || !messageText.trim()) {
+          throw new Error('Cannot send empty WhatsApp message: image attachment could not be loaded.');
+        }
+        sent = await this.sock.sendMessage(targetJid, {
+          text: messageText,
+        });
+        console.log(`[Real WhatsApp] Message successfully delivered to +${clean} (ID: ${sent?.key?.id})`);
+      }
 
       return {
         success: true,

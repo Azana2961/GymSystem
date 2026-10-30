@@ -121,10 +121,10 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
       notes: 'Fee Rs. $formattedPrice collected via $_selectedMethod on ${now.toString().split(' ')[0]}',
     );
 
-    // Persist to SQLite & update shared state
+    // Persist to SQLite & update shared state (ReceiptQrDialog will send the full Pass Card image)
     MembersProvider.instance.updateMember(
       updated,
-      sendReceipt: true,
+      sendReceipt: false,
       paidAmount: _finalPrice,
       paymentMethod: _selectedMethod,
     );

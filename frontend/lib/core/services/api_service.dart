@@ -71,11 +71,15 @@ class ApiService {
       final request = await client.postUrl(Uri.parse('$baseUrl/api/members/register'));
       request.headers.contentType = ContentType.json;
 
-      final status = member.isPaymentPending
-          ? 'due'
-          : (member.isExpired ? 'expired' : 'paid');
+      final status = member.isVisitor
+          ? 'visitor'
+          : (member.isPaymentPending
+              ? 'due'
+              : (member.isExpired ? 'expired' : 'paid'));
 
       final payload = jsonEncode({
+        'id': member.id,
+        'qr_token': member.qrToken ?? member.id,
         'name': member.name,
         'phone': member.phone,
         'email': member.email,
@@ -113,9 +117,11 @@ class ApiService {
       final request = await client.putUrl(Uri.parse('$baseUrl/api/members/${member.id}'));
       request.headers.contentType = ContentType.json;
 
-      final status = member.isPaymentPending
-          ? 'due'
-          : (member.isExpired ? 'expired' : 'paid');
+      final status = member.isVisitor
+          ? 'visitor'
+          : (member.isPaymentPending
+              ? 'due'
+              : (member.isExpired ? 'expired' : 'paid'));
 
       final payload = jsonEncode({
         'name': member.name,
@@ -238,12 +244,13 @@ class ApiService {
     }
   }
 
-  /// Enqueue custom WhatsApp message into anti-ban queue
+  /// Enqueue custom WhatsApp message (with optional Pass Card PNG image) into anti-ban queue
   Future<bool> sendWhatsAppMessage({
     String? memberId,
     required String phone,
     required String text,
     String type = 'custom',
+    String? imageBase64,
   }) async {
     final client = _createClient();
     try {
@@ -254,7 +261,42 @@ class ApiService {
         'phone': phone,
         'text': text,
         'type': type,
+        if (imageBase64 != null) 'image_base64': imageBase64,
       }));
+      final response = await request.close();
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Fetch WhatsApp settings & custom message templates from backend
+  Future<Map<String, dynamic>?> getWhatsAppSettings() async {
+    final client = _createClient();
+    try {
+      final request = await client.getUrl(Uri.parse('$baseUrl/api/whatsapp/settings'));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final body = await response.transform(utf8.decoder).join();
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        return json['settings'] as Map<String, dynamic>?;
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+    return null;
+  }
+
+  /// Save custom WhatsApp settings & message templates to backend
+  Future<bool> updateWhatsAppSettings(Map<String, dynamic> settings) async {
+    final client = _createClient();
+    try {
+      final request = await client.postUrl(Uri.parse('$baseUrl/api/whatsapp/settings'));
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode(settings));
       final response = await request.close();
       return response.statusCode == 200;
     } catch (_) {
@@ -377,6 +419,42 @@ class ApiService {
     final client = _createClient();
     try {
       final request = await client.getUrl(Uri.parse('$baseUrl/api/ping'));
+      final response = await request.close();
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Fetch registered tablet kiosk devices and their status
+  Future<List<Map<String, dynamic>>> getTabletDevices() async {
+    final client = _createClient();
+    try {
+      final request = await client.getUrl(Uri.parse('$baseUrl/api/tablet/devices'));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final body = await response.transform(utf8.decoder).join();
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        if (json['devices'] is List) {
+          return List<Map<String, dynamic>>.from(json['devices'] as List);
+        }
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+    return [];
+  }
+
+  /// Signal all connected tablets to re-sync member roster
+  Future<bool> triggerTabletSync() async {
+    final client = _createClient();
+    try {
+      final request = await client.postUrl(Uri.parse('$baseUrl/api/tablet/broadcast-sync'));
+      request.headers.contentType = ContentType.json;
+      request.write('{}');
       final response = await request.close();
       return response.statusCode == 200;
     } catch (_) {

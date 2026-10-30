@@ -88,6 +88,57 @@ class AppSettings {
   bool sendPaymentReceipt = true;
   bool sendWelcomeMessage = true;
 
+  // Customizable WhatsApp Message Templates
+  static const String defaultTemplateWelcome =
+      '{Salam|Hello|Welcome} {name}! 👋\n'
+      'Thank you for joining *{gym_name}*! Your *{plan}* membership pass is active and valid until *{expiry_date}*.\n'
+      'Your Member ID is *{id}*.\n'
+      'Scan the attached Digital Membership Pass QR code at the front desk kiosk for entry! 💪';
+
+  static const String defaultTemplateDue =
+      '{Salam|Hello|Dear} {name}! ⚠️\n'
+      'Friendly reminder from *{gym_name}*.\n'
+      'Your *{plan}* membership is due for renewal on *{expiry_date}*.\n'
+      'Kindly visit reception to renew and keep your gym access uninterrupted. Stay strong! 🏋️';
+
+  static const String defaultTemplateExpired =
+      '{Salam|Hello|Dear} {name}!\n'
+      'Your *{plan}* membership at *{gym_name}* has *expired* as of *{expiry_date}*.\n'
+      'Visit reception today to reactivate your membership pass. We hope to see you back on the gym floor soon! 💪';
+
+  static const String defaultTemplateReceipt =
+      '{Salam|Hello} {name}! 🧾\n'
+      'Payment confirmed at *{gym_name}*.\n'
+      'Plan: *{plan}*\n'
+      'Amount Paid: *Rs. {amount}* ({method})\n'
+      'Valid Until: *{expiry_date}*\n'
+      'Thank you for training with us! 🔥';
+
+  String gymName = 'Lá Fitness';
+  String templateWelcome = defaultTemplateWelcome;
+  String templateDue = defaultTemplateDue;
+  String templateExpired = defaultTemplateExpired;
+  String templateReceipt = defaultTemplateReceipt;
+
+  void resetTemplatesToDefault() {
+    templateWelcome = defaultTemplateWelcome;
+    templateDue = defaultTemplateDue;
+    templateExpired = defaultTemplateExpired;
+    templateReceipt = defaultTemplateReceipt;
+  }
+
+  String renderTemplate(String template, Map<String, String> vars) {
+    var out = template;
+    final allVars = <String, String>{
+      'gym_name': gymName,
+      ...vars,
+    };
+    for (final entry in allVars.entries) {
+      out = out.replaceAll('{${entry.key}}', entry.value);
+    }
+    return out;
+  }
+
 
   // Security
   bool requireManagerPin = false;
@@ -104,6 +155,7 @@ class AppSettings {
       }
     }
     // Fallback matches
+    if (clean.contains('visitor')) return 500.0;
     if (clean.contains('silver')) return 18000.0;
     if (clean.contains('gold')) return 30000.0;
     if (clean.contains('platinum') || clean.contains('vip')) return 65000.0;
@@ -117,6 +169,7 @@ class AppSettings {
         return p.durationDays;
       }
     }
+    if (clean.contains('visitor')) return 1;
     if (clean.contains('silver')) return 90;
     if (clean.contains('gold')) return 180;
     if (clean.contains('platinum') || clean.contains('vip')) return 365;
