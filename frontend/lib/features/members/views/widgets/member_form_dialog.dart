@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:gym_system/core/constants/app_settings.dart';
-import 'package:gym_system/core/constants/dummy_data.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/features/members/models/member_model.dart';
 import 'package:gym_system/features/members/providers/members_provider.dart';
@@ -171,15 +170,8 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
 
       if (widget.memberToEdit != null) {
         widget.provider.updateMember(member, paidAmount: _paidNowAmount, paymentMethod: methodUsed);
-        final dummyIdx = DummyData.members.indexWhere((m) => m.id == member.id);
-        if (dummyIdx != -1) {
-          DummyData.members[dummyIdx] = member;
-        }
       } else {
         widget.provider.addMember(member, sendWelcome: false);
-        if (!DummyData.members.any((m) => m.id == member.id)) {
-          DummyData.members.insert(0, member);
-        }
       }
 
       ScaffoldMessenger.of(context).showSnackBar(

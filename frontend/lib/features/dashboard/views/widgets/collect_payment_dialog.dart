@@ -99,9 +99,7 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
   double get _paidNowAmount => (_finalPrice - _remainingUdhaar).clamp(0.0, _finalPrice);
 
   List<MemberModel> get _filteredMembers {
-    final membersList = MembersProvider.instance.allMembers.isNotEmpty
-        ? MembersProvider.instance.allMembers
-        : DummyData.members;
+    final membersList = MembersProvider.instance.allMembers;
 
     if (_searchQuery.trim().isEmpty) {
       return membersList.take(6).toList();

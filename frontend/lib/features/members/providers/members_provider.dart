@@ -41,18 +41,12 @@ class MembersProvider extends ChangeNotifier {
 
     try {
       final list = await ApiService.instance.getMembers();
-      if (list.isNotEmpty) {
-        _members = list;
-        _syncDummyData();
-        _isLoading = false;
-        notifyListeners();
-        return;
-      }
+      _members = list;
+      _isLoading = false;
+      notifyListeners();
+      return;
     } catch (_) {}
 
-    if (_members.isEmpty) {
-      _members = List.from(DummyData.members);
-    }
     _isLoading = false;
     notifyListeners();
   }

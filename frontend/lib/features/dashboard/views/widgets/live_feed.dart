@@ -4,7 +4,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:gym_system/core/constants/app_settings.dart';
-import 'package:gym_system/core/constants/dummy_data.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/features/dashboard/models/attendance_model.dart';
 import 'package:gym_system/features/members/models/member_model.dart';
@@ -28,7 +27,7 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
   @override
   void initState() {
     super.initState();
-    _feed = List.from(DummyData.recentCheckIns);
+    _feed = [];
     _fetchLiveFeed();
     // Poll every 2 seconds for real-time tablet attendance updates
     _poller = Timer.periodic(const Duration(seconds: 2), (_) => _fetchLiveFeed());

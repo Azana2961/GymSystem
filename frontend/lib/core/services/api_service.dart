@@ -216,6 +216,26 @@ class ApiService {
     return null;
   }
 
+  /// Fetch real attendance records for a specific member from SQLite
+  Future<List<Map<String, dynamic>>> getMemberAttendance(String memberId) async {
+    final client = _createClient();
+    try {
+      final request = await client.getUrl(Uri.parse('$baseUrl/api/members/$memberId/attendance'));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final body = await response.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data['records'] is List) {
+          return (data['records'] as List).cast<Map<String, dynamic>>();
+        }
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+    return [];
+  }
+
   // ── 3. WhatsApp Anti-Ban Automation ─────────────────────────────────────
 
   /// Trigger automated anti-ban WhatsApp reminders for all due and expired members

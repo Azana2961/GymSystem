@@ -155,6 +155,13 @@ const stmts = {
     WHERE date(scanned_at) = date('now', '-1 day', 'localtime')
   `),
 
+  getMemberAttendance: db.prepare(`
+    SELECT * FROM attendance
+    WHERE member_id = ? OR qr_token = ?
+    ORDER BY id DESC
+    LIMIT 60
+  `),
+
   // WhatsApp Queue Statements
   enqueueWaMessage: db.prepare(`
     INSERT INTO whatsapp_queue (member_id, recipient_phone, message_text, message_type, image_path, status, created_at)
@@ -302,6 +309,7 @@ module.exports = {
   getTodayCheckinsCount: () => stmts.getTodayCheckinsCount.get().count,
   getYesterdayCheckinsCount: () => stmts.getYesterdayCheckinsCount.get().count,
   getDueOrExpiredMembers: () => stmts.getDueOrExpiredMembers.all(),
+  getMemberAttendance: (id, qrToken) => stmts.getMemberAttendance.all(id, qrToken || id),
 
   // WhatsApp helpers
   enqueueWaMessage: (msg) => stmts.enqueueWaMessage.run({ image_path: null, ...msg }),

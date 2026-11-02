@@ -62,7 +62,8 @@ class CriticalAlertsWidget extends StatelessWidget {
                         ...expiringMembers.take(3).map((m) => ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: CircleAvatar(
-                                backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${m.id}'),
+                                backgroundColor: AppColors.primary.withValues(alpha: 0.15),
+                                child: Text(m.name.isNotEmpty ? m.name[0].toUpperCase() : 'M', style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
                               ),
                               title: Text(m.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                               subtitle: Text('Expires in ${m.expiryDate.difference(DateTime.now()).inDays} days'),

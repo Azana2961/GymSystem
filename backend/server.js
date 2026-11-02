@@ -587,6 +587,17 @@ app.get('/api/members/:id', (req, res) => {
   res.json({ success: true, member });
 });
 
+app.get('/api/members/:id/attendance', (req, res) => {
+  try {
+    const member = db.getMemberById(req.params.id);
+    const token = member ? member.qr_token : req.params.id;
+    const records = db.getMemberAttendance(req.params.id, token);
+    res.json({ success: true, count: records.length, records });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.put('/api/members/:id', (req, res) => {
   try {
     const existing = db.getMemberById(req.params.id);
