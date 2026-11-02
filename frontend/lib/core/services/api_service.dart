@@ -354,6 +354,26 @@ class ApiService {
     return null;
   }
 
+  /// Fetch historical sent WhatsApp logs
+  Future<List<Map<String, dynamic>>> getWhatsAppLogs({int limit = 60}) async {
+    final client = _createClient();
+    try {
+      final request = await client.getUrl(Uri.parse('$baseUrl/api/whatsapp/logs?limit=$limit'));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final body = await response.transform(utf8.decoder).join();
+        final json = jsonDecode(body);
+        if (json['logs'] is List) {
+          return List<Map<String, dynamic>>.from(json['logs']);
+        }
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+    return [];
+  }
+
   /// Fetch real WhatsApp Web client status and connected user details
   Future<Map<String, dynamic>?> getRealWhatsAppStatus() async {
     final client = _createClient();

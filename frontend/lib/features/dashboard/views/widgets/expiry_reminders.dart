@@ -61,6 +61,7 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
     AppSettings.instance.addListener(_onSettingsUpdated);
     // Check if backend already has active queue items on load
     _syncLiveQueueFromServer();
+    _startLiveQueuePolling();
   }
 
   @override
@@ -73,6 +74,19 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
 
   void _onSettingsUpdated() {
     if (mounted) setState(() {});
+  }
+
+  bool _isToday(DateTime? dt) {
+    if (dt == null) return false;
+    final now = DateTime.now();
+    return dt.year == now.year && dt.month == now.month && dt.day == now.day;
+  }
+
+  DateTime? _parseTimestamp(dynamic raw) {
+    if (raw == null) return null;
+    final s = raw.toString().trim();
+    if (s.isEmpty) return null;
+    return DateTime.tryParse(s.replaceFirst(' ', 'T'));
   }
 
   String _normalizePhone(String raw) {
@@ -118,22 +132,21 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
         );
       }).toList();
     } else {
-      _reminders = [
-        ReminderItem(
-          id: 'M002',
-          name: 'Ayesha Khan',
-          phone: '+92 321 4589211',
-          plan: 'Silver Plan',
-          expiryDate: DateTime.now().subtract(const Duration(days: 5)),
-        ),
-        ReminderItem(
-          id: 'M004',
-          name: 'Usman Khalid',
-          phone: '+92 301 7748123',
-          plan: 'Basic Plan',
-          expiryDate: DateTime.now().subtract(const Duration(days: 2)),
-        ),
-      ];
+      _reminders = [];
+    }
+
+    // Preserve any member already marked as sent today so they remain in Sent tab for reference for that day
+    if (preserveFrom != null) {
+      for (final prev in preserveFrom.values) {
+        if (prev.isSent && _isToday(prev.sentAt)) {
+          final existingIdx = _reminders.indexWhere((r) => r.id == prev.id);
+          if (existingIdx != -1) {
+            _reminders[existingIdx] = prev;
+          } else {
+            _reminders.add(prev);
+          }
+        }
+      }
     }
   }
 
@@ -141,7 +154,7 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
       _reminders.where((r) => r.queueState != 'sent').toList();
 
   List<ReminderItem> get _sentList {
-    final list = _reminders.where((r) => r.queueState == 'sent').toList();
+    final list = _reminders.where((r) => r.queueState == 'sent' && _isToday(r.sentAt)).toList();
     list.sort((a, b) =>
         (b.sentAt ?? DateTime.now()).compareTo(a.sentAt ?? DateTime.now()));
     return list;
@@ -301,13 +314,19 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
   Future<void> _syncLiveQueueFromServer() async {
     if (!mounted) return;
 
-    final statusData = await ApiService.instance.getWhatsAppStatus();
-    if (!mounted) return;
+    try {
+      final statusDataFuture = ApiService.instance.getWhatsAppStatus();
+      final logsFuture = ApiService.instance.getWhatsAppLogs(limit: 60);
 
-    if (statusData != null) {
-      final currentTask = statusData['currentTask'] as Map<String, dynamic>?;
-      final recentQueue = (statusData['recentQueue'] is List)
-          ? List<Map<String, dynamic>>.from(statusData['recentQueue'] as List)
+      final results = await Future.wait([statusDataFuture, logsFuture]);
+      if (!mounted) return;
+
+      final statusData = results[0] as Map<String, dynamic>?;
+      final logsList = results[1] as List<Map<String, dynamic>>? ?? [];
+
+      final currentTask = statusData?['currentTask'] as Map<String, dynamic>?;
+      final recentQueue = (statusData?['recentQueue'] is List)
+          ? List<Map<String, dynamic>>.from(statusData!['recentQueue'] as List)
           : <Map<String, dynamic>>[];
 
       final activeMemberId = currentTask?['memberId']?.toString();
@@ -318,34 +337,60 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
           ? (currentTask!['delaySec'] as num).toDouble()
           : null;
 
+      // Merge all rows (recent queue + logs)
+      final allRows = <Map<String, dynamic>>[...recentQueue, ...logsList];
+
       bool changed = false;
 
+      // 1. Process existing reminders in widget
       for (final item in _reminders) {
-        if (item.queueState == 'idle' || item.queueState == 'sent') continue;
-
         final itemPhoneNorm = _normalizePhone(item.phone);
 
-        // Find latest matching queue entry from backend
-        Map<String, dynamic>? matchedRow;
+        // Check if message was sent today from any row
+        Map<String, dynamic>? matchedSentRow;
+        for (final row in allRows) {
+          final rowStatus = row['status']?.toString().toLowerCase();
+          if (rowStatus != 'sent') continue;
+
+          final rowMemberId = row['member_id']?.toString();
+          final rowPhone = _normalizePhone(row['recipient_phone']?.toString() ?? '');
+
+          if ((rowMemberId != null && rowMemberId == item.id) ||
+              (rowPhone.isNotEmpty && rowPhone == itemPhoneNorm)) {
+            final ts = _parseTimestamp(row['processed_at'] ?? row['created_at']);
+            if (_isToday(ts)) {
+              matchedSentRow = row;
+              break;
+            }
+          }
+        }
+
+        if (matchedSentRow != null) {
+          final ts = _parseTimestamp(matchedSentRow['processed_at'] ?? matchedSentRow['created_at']) ?? DateTime.now();
+          if (item.queueState != 'sent' || item.sentAt != ts) {
+            item.queueState = 'sent';
+            item.sentAt = ts;
+            item.sentChannel = 'WhatsApp';
+            item.activeDelaySec = null;
+            changed = true;
+          }
+          continue;
+        }
+
+        // If item was already sent today, preserve it
+        if (item.queueState == 'sent' && _isToday(item.sentAt)) {
+          continue;
+        }
+
+        // Check recentQueue for pending/queued state
+        Map<String, dynamic>? matchedQueueRow;
         for (final q in recentQueue) {
           final qMemberId = q['member_id']?.toString();
           final qPhone = _normalizePhone(q['recipient_phone']?.toString() ?? '');
           if ((qMemberId != null && qMemberId == item.id) ||
               (qPhone.isNotEmpty && qPhone == itemPhoneNorm)) {
-            matchedRow = q;
-            break; // recentQueue is ordered by id DESC, so first match is newest
-          }
-        }
-
-        if (matchedRow != null) {
-          final qStatus = matchedRow['status']?.toString() ?? 'pending';
-          if (qStatus == 'sent') {
-            item.queueState = 'sent';
-            item.sentAt = DateTime.now();
-            item.activeDelaySec = null;
-            _batchSentCount++;
-            changed = true;
-            continue;
+            matchedQueueRow = q;
+            break;
           }
         }
 
@@ -359,6 +404,13 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
             item.activeDelaySec = activeDelay;
             changed = true;
           }
+        } else if (matchedQueueRow != null &&
+            (matchedQueueRow['status'] == 'pending' || matchedQueueRow['status'] == 'processing')) {
+          if (item.queueState != 'queued') {
+            item.queueState = 'queued';
+            item.activeDelaySec = null;
+            changed = true;
+          }
         } else if (item.queueState == 'sending' && currentTask != null) {
           item.queueState = 'queued';
           item.activeDelaySec = null;
@@ -366,10 +418,48 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
         }
       }
 
+      // 2. Add any member who received a message today but isn't in _reminders
+      final allMembers = _membersProvider.allMembers;
+      for (final row in allRows) {
+        final rowStatus = row['status']?.toString().toLowerCase();
+        if (rowStatus != 'sent') continue;
+
+        final ts = _parseTimestamp(row['processed_at'] ?? row['created_at']);
+        if (!_isToday(ts)) continue;
+
+        final rowMemberId = row['member_id']?.toString();
+        final rowPhone = _normalizePhone(row['recipient_phone']?.toString() ?? '');
+
+        final exists = _reminders.any((r) =>
+            (rowMemberId != null && r.id == rowMemberId) ||
+            (rowPhone.isNotEmpty && _normalizePhone(r.phone) == rowPhone));
+
+        if (!exists) {
+          // Find member in allMembers
+          final mem = allMembers.where((m) =>
+              (rowMemberId != null && m.id == rowMemberId) ||
+              (rowPhone.isNotEmpty && _normalizePhone(m.phone ?? '') == rowPhone)).firstOrNull;
+
+          if (mem != null) {
+            _reminders.add(ReminderItem(
+              id: mem.id,
+              name: mem.name,
+              phone: mem.phone ?? row['recipient_phone']?.toString() ?? '',
+              plan: mem.plan,
+              expiryDate: mem.expiryDate,
+              queueState: 'sent',
+              sentAt: ts ?? DateTime.now(),
+              sentChannel: 'WhatsApp',
+            ));
+            changed = true;
+          }
+        }
+      }
+
       // Ensure at least the first queued item shows 'sending' if worker is busy
       if (!_reminders.any((r) => r.queueState == 'sending')) {
         final firstQueued = _reminders.where((r) => r.queueState == 'queued').firstOrNull;
-        if (firstQueued != null) {
+        if (firstQueued != null && currentTask != null) {
           firstQueued.queueState = 'sending';
           firstQueued.activeDelaySec = activeDelay;
           changed = true;
@@ -379,7 +469,7 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
       if (changed && mounted) {
         setState(() {});
       }
-    } else {
+    } catch (_) {
       // Offline fallback simulation progression if backend is unreachable
       final sendingItem = _currentlySendingItem;
       if (sendingItem != null &&
