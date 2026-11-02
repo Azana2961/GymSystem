@@ -24,6 +24,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final MembersProvider _membersProvider = MembersProvider.instance;
   Map<String, dynamic>? _liveStats;
   Timer? _statsPoller;
+  bool _hasConnectedTablet = false;
 
   @override
   void initState() {
@@ -50,9 +51,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _fetchStats() async {
     try {
       final stats = await ApiService.instance.getStats();
-      if (mounted && stats != null) {
+      final hasTablet = await ApiService.instance.hasConnectedTablet();
+      if (mounted) {
         setState(() {
-          _liveStats = stats;
+          if (stats != null) _liveStats = stats;
+          _hasConnectedTablet = hasTablet;
         });
       }
     } catch (_) {}
@@ -316,18 +319,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                     OutlinedButton.icon(
                       onPressed: () => _openTabletKioskDialog(context),
-                      icon: const Icon(Icons.tablet_mac_rounded, color: AppColors.primary, size: 18),
-                      label: const Text(
-                        'Tablet Kiosk',
-                        style: TextStyle(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
+                      icon: Icon(
+                        Icons.tablet_mac_rounded,
+                        color: _hasConnectedTablet ? AppColors.primary : const Color(0xFFFF1744),
+                        size: 18,
+                      ),
+                      label: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Tablet Kiosk',
+                            style: TextStyle(
+                              color: _hasConnectedTablet ? AppColors.primary : const Color(0xFFFF1744),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _hasConnectedTablet ? AppColors.primary : const Color(0xFFFF1744),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: (_hasConnectedTablet ? AppColors.primary : const Color(0xFFFF1744)).withValues(alpha: 0.6),
+                                  blurRadius: 4,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                       style: OutlinedButton.styleFrom(
-                        backgroundColor: AppColors.surfaceLight,
-                        side: const BorderSide(color: AppColors.primary, width: 1.5),
+                        backgroundColor: _hasConnectedTablet
+                            ? AppColors.surfaceLight
+                            : const Color(0xFFFF1744).withValues(alpha: 0.08),
+                        side: BorderSide(
+                          color: _hasConnectedTablet ? AppColors.primary : const Color(0xFFFF1744),
+                          width: 1.5,
+                        ),
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),

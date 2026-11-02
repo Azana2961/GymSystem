@@ -1,4 +1,4 @@
-import 'dart:async';
+  import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -67,14 +67,16 @@ class KioskSyncService extends ChangeNotifier {
   Future<bool> connect() async {
     _reconnectTimer?.cancel();
 
-    // 1. Check HTTP Ping Reachability (with auto-discovery for Android Emulator 10.0.2.2 & LAN IP)
+    final target = serverUrl.trim();
+    if (target.isEmpty) {
+      _isOnline = false;
+      notifyListeners();
+      return false;
+    }
+
+    // Connect to the dynamically configured server URL (paired via QR code or entered in settings)
     final candidates = <String>{
-      serverUrl,
-      'http://10.0.2.2:5000',
-      'http://10.5.49.144:5000',
-      'http://10.5.40.52:5000',
-      'http://localhost:5000',
-      'http://127.0.0.1:5000',
+      target,
     };
 
     bool reachable = false;
@@ -407,12 +409,20 @@ class KioskSyncService extends ChangeNotifier {
   }
 
   void _startHeartbeat() {
+    int heartbeatCount = 0;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 25), (_) async {
       if (!_isOnline) {
         await connect();
         return;
       }
+
+      heartbeatCount++;
+      // Auto-refresh full member roster every ~2 minutes while online to guarantee 100% sync
+      if (heartbeatCount % 5 == 0) {
+        await syncMembersRoster();
+      }
+
       try {
         final res = await http
             .post(

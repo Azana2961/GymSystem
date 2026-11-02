@@ -9,6 +9,7 @@ import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/features/dashboard/models/attendance_model.dart';
 import 'package:gym_system/features/members/models/member_model.dart';
 import 'package:gym_system/core/services/api_service.dart';
+import 'collect_payment_dialog.dart';
 
 class LiveFeedWidget extends StatefulWidget {
   const LiveFeedWidget({super.key});
@@ -102,112 +103,303 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
     return '$base${rawUrl.startsWith('/') ? '' : '/'}$rawUrl';
   }
 
-  void _showVisitorPhotoDialog(BuildContext context, AttendanceModel item) {
+  void _showMemberProfileDialog(BuildContext context, AttendanceModel item) {
     final rawPhoto = item.visitorPhotoUrl;
-    if (rawPhoto == null || rawPhoto.isEmpty) return;
-    final resolved = _resolvePhotoUrl(rawPhoto);
+    final hasPhoto = rawPhoto != null && rawPhoto.isNotEmpty;
+    final resolved = hasPhoto ? _resolvePhotoUrl(rawPhoto) : null;
     final timeStr =
         '${item.checkInTime.hour.toString().padLeft(2, '0')}:${item.checkInTime.minute.toString().padLeft(2, '0')}';
 
     final cat = item.category;
     final Color accentColor = cat == 'expired'
         ? AppColors.error
-        : (cat == 'due' ? AppColors.warning : _visitorColor);
-    final String titleText = cat == 'expired'
-        ? 'Expired Member Verification Photo'
-        : (cat == 'due' ? 'Due / Udhaar Verification Photo' : 'Visitor Scan Snapshot');
+        : (cat == 'due'
+            ? AppColors.warning
+            : (cat == 'visitor' ? _visitorColor : AppColors.success));
+
+    final String statusLabel = cat == 'expired'
+        ? 'MEMBERSHIP EXPIRED'
+        : (cat == 'due'
+            ? 'UDHAAR / PAYMENT DUE'
+            : (cat == 'visitor' ? 'VISITOR GUEST PASS' : 'ACTIVE REGULAR MEMBER'));
 
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           side: BorderSide(color: accentColor.withValues(alpha: 0.6), width: 1.5),
         ),
         child: Container(
-          width: 360,
-          padding: const EdgeInsets.all(20),
+          width: 420,
+          padding: const EdgeInsets.all(22),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Top Bar: Status Badge + Close Button
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      Icon(Icons.camera_alt_rounded, color: accentColor, size: 18),
-                      const SizedBox(width: 8),
-                      Text(
-                        titleText,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
-                      ),
-                    ],
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: accentColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: accentColor.withValues(alpha: 0.6)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          cat == 'expired'
+                              ? Icons.error_rounded
+                              : (cat == 'due'
+                                  ? Icons.warning_rounded
+                                  : (cat == 'visitor' ? Icons.badge_rounded : Icons.check_circle_rounded)),
+                          color: accentColor,
+                          size: 14,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          statusLabel,
+                          style: TextStyle(
+                            color: accentColor,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 11,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(ctx),
-                    icon: const Icon(Icons.close_rounded, size: 18, color: AppColors.textMuted),
+                    icon: const Icon(Icons.close_rounded, size: 20, color: AppColors.textMuted),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                   ),
                 ],
               ),
-              const SizedBox(height: 14),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: resolved.startsWith('data:image')
-                    ? Image.memory(
-                        base64Decode(resolved.split(',').last),
-                        height: 240,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
+              const SizedBox(height: 16),
+
+              // Avatar / Photo Snapshot Section
+              Center(
+                child: hasPhoto && resolved != null
+                    ? Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: accentColor, width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: accentColor.withValues(alpha: 0.25),
+                              blurRadius: 16,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: resolved.startsWith('data:image')
+                              ? Image.memory(
+                                  base64Decode(resolved.split(',').last),
+                                  height: 220,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                )
+                              : Image.network(
+                                  resolved,
+                                  height: 220,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) => Container(
+                                    height: 160,
+                                    color: AppColors.surfaceLight,
+                                    alignment: Alignment.center,
+                                    child: const Icon(Icons.broken_image_rounded, color: AppColors.textMuted, size: 40),
+                                  ),
+                                ),
+                        ),
                       )
-                    : Image.network(
-                        resolved,
-                        height: 240,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => Container(
-                          height: 180,
-                          color: AppColors.surfaceLight,
-                          alignment: Alignment.center,
-                          child: const Icon(Icons.broken_image_rounded, color: AppColors.textMuted, size: 40),
+                    : Container(
+                        width: 90,
+                        height: 90,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: accentColor.withValues(alpha: 0.15),
+                          border: Border.all(color: accentColor, width: 2.5),
+                        ),
+                        child: Center(
+                          child: Text(
+                            item.member.name.isNotEmpty ? item.member.name[0].toUpperCase() : 'M',
+                            style: TextStyle(
+                              fontSize: 36,
+                              fontWeight: FontWeight.w900,
+                              color: accentColor,
+                            ),
+                          ),
                         ),
                       ),
               ),
               const SizedBox(height: 14),
-              Text(
-                item.member.name,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppColors.textPrimary),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${item.member.plan} (${item.member.qrToken ?? item.member.id}) • Checked in at $timeStr',
-                style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
-              ),
-              if (item.member.dueAmount > 0) ...[
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.warning.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
-                  ),
-                  child: Text(
-                    'Pending Udhaar: Rs. ${AppSettings.formatAmount(item.member.dueAmount)}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.warning,
+
+              // Name & Identifier
+              Center(
+                child: Column(
+                  children: [
+                    Text(
+                      item.member.name,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'ID: ${item.member.id} • Pass: ${item.member.qrToken ?? item.member.id}',
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Member Details Grid / List Card
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceLight,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                  children: [
+                    _buildProfileRow('Membership Plan', item.member.plan, Icons.card_membership_rounded),
+                    const Divider(height: 16, color: AppColors.border),
+                    _buildProfileRow(
+                      'Expiry Date',
+                      item.member.expiryDate.toString().split(' ').first,
+                      Icons.event_rounded,
+                      valueColor: item.member.isExpired ? AppColors.error : null,
+                    ),
+                    const Divider(height: 16, color: AppColors.border),
+                    _buildProfileRow(
+                      'Check-in Time',
+                      'Today at $timeStr',
+                      Icons.access_time_rounded,
+                    ),
+                    if (item.member.phone != null && item.member.phone!.isNotEmpty) ...[
+                      const Divider(height: 16, color: AppColors.border),
+                      _buildProfileRow('Phone', item.member.phone!, Icons.phone_rounded),
+                    ],
+                  ],
+                ),
+              ),
+
+              // Outstanding Dues Alert Card if any
+              if (item.member.dueAmount > 0) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.warning.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.warning.withValues(alpha: 0.6)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.account_balance_wallet_rounded, color: AppColors.warning, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Outstanding Udhaar / Due: Rs. ${AppSettings.formatAmount(item.member.dueAmount)}',
+                          style: const TextStyle(
+                            color: AppColors.warning,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
+
+              const SizedBox(height: 18),
+
+              // Bottom Action Buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.textPrimary,
+                        side: const BorderSide(color: AppColors.border),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                  if (item.member.isExpired || item.member.dueAmount > 0 || cat == 'expired' || cat == 'due') ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          showDialog(
+                            context: context,
+                            builder: (_) => CollectPaymentDialog(initialMember: item.member),
+                          );
+                        },
+                        icon: const Icon(Icons.payments_rounded, color: Colors.black, size: 18),
+                        label: const Text(
+                          'Collect Fee / Renew',
+                          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildProfileRow(String label, String value, IconData icon, {Color? valueColor}) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: AppColors.textMuted),
+        const SizedBox(width: 8),
+        Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+        const Spacer(),
+        Text(
+          value,
+          style: TextStyle(
+            color: valueColor ?? AppColors.textPrimary,
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+        ),
+      ],
     );
   }
 
@@ -405,7 +597,7 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
                       final hasPhoto = att.visitorPhotoUrl != null && att.visitorPhotoUrl!.isNotEmpty;
 
                       return InkWell(
-                        onTap: hasPhoto ? () => _showVisitorPhotoDialog(context, att) : null,
+                        onTap: () => _showMemberProfileDialog(context, att),
                         borderRadius: BorderRadius.circular(9),
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
@@ -413,7 +605,8 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
                             color: AppColors.surface,
                             borderRadius: BorderRadius.circular(9),
                             border: Border.all(
-                              color: hasPhoto ? color.withValues(alpha: 0.45) : AppColors.border,
+                              color: hasPhoto ? color.withValues(alpha: 0.6) : color.withValues(alpha: 0.2),
+                              width: hasPhoto ? 1.5 : 1.0,
                             ),
                           ),
                           child: Row(
@@ -457,23 +650,29 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
                                         ),
                                       ),
                                     ],
-                                    if (hasPhoto) ...[
-                                      const SizedBox(height: 2),
-                                      Row(
-                                        children: [
-                                          Icon(Icons.photo_camera_rounded, size: 10, color: color),
-                                          const SizedBox(width: 3),
-                                          Text(
-                                            'Tap to view photo',
+                                    const SizedBox(height: 2),
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          hasPhoto ? Icons.photo_camera_rounded : Icons.person_search_rounded,
+                                          size: 10,
+                                          color: color,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Expanded(
+                                          child: Text(
+                                            hasPhoto ? 'Photo • Tap for profile' : 'Tap for profile',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
                                               color: color,
                                               fontSize: 9.5,
                                               fontWeight: FontWeight.w600,
                                             ),
                                           ),
-                                        ],
-                                      ),
-                                    ],
+                                        ),
+                                      ],
+                                    ),
                                   ],
                                 ),
                               ),

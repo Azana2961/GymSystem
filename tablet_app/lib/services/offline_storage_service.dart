@@ -150,7 +150,7 @@ class OfflineStorageService {
 
   // ── Server & Device Configuration ────────────────────────────────────────
 
-  String get serverUrl => _prefs.getString(_keyServerUrl) ?? 'http://10.0.2.2:5000';
+  String get serverUrl => _prefs.getString(_keyServerUrl) ?? '';
 
   Future<void> setServerUrl(String url) async {
     var clean = url.trim();

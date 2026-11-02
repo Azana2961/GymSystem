@@ -459,6 +459,30 @@ class ApiService {
     return [];
   }
 
+  /// Check whether any tablet kiosk is currently connected & online
+  Future<bool> hasConnectedTablet() async {
+    final client = _createClient();
+    try {
+      final request = await client.getUrl(Uri.parse('$baseUrl/api/tablet/devices'));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final body = await response.transform(utf8.decoder).join();
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        if (json['hasConnectedTablet'] != null) {
+          return json['hasConnectedTablet'] == true;
+        }
+        if (json['devices'] is List) {
+          final list = json['devices'] as List;
+          return list.any((d) => d['is_online'] == true);
+        }
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+    return false;
+  }
+
   /// Signal all connected tablets to re-sync member roster
   Future<bool> triggerTabletSync() async {
     final client = _createClient();

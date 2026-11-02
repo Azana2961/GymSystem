@@ -262,7 +262,26 @@ app.post('/api/tablet/heartbeat', (req, res) => {
 
 app.get('/api/tablet/devices', (req, res) => {
   const devices = db.getAllTabletDevices();
-  res.json({ success: true, devices });
+  const now = Date.now();
+  const enriched = devices.map((d) => {
+    let lastSeenMs = 0;
+    if (d.last_seen) {
+      const timeStr = d.last_seen.includes('T') ? d.last_seen : d.last_seen.replace(' ', 'T') + 'Z';
+      lastSeenMs = new Date(timeStr).getTime();
+    }
+    const isOnline = (now - lastSeenMs) < 65000; // seen within 65s (heartbeat is 25s)
+    return {
+      ...d,
+      is_online: isOnline,
+    };
+  });
+  const hasConnectedTablet = enriched.some((d) => d.is_online);
+  res.json({
+    success: true,
+    devices: enriched,
+    hasConnectedTablet,
+    connectedCount: enriched.filter((d) => d.is_online).length,
+  });
 });
 
 // Force all connected tablets to re-sync members roster
