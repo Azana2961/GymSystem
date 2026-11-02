@@ -227,102 +227,112 @@ class _DashboardScreenState extends State<DashboardScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 // Title and Status
-                Row(
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: const BoxDecoration(
-                        color: AppColors.primary,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.primary,
-                            blurRadius: 6,
-                            spreadRadius: 1,
-                          ),
-                        ],
+                Expanded(
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: const BoxDecoration(
+                          color: AppColors.primary,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primary,
+                              blurRadius: 6,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Dashboard Overview',
-                          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 22,
-                          ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Dashboard Overview',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 22,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            const Text(
+                              'SQLite Connected • Live Tablet Feed & WhatsApp Engine Active',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 2),
-                        const Text(
-                          'SQLite Connected • Live Tablet Feed & WhatsApp Engine Active',
-                          style: TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 16),
 
                 // Quick Action Buttons
                 Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     ElevatedButton.icon(
                       onPressed: () => _openNewRegistration(context),
-                      icon: const Icon(Icons.person_add_alt_1_rounded, color: Colors.black, size: 18),
+                      icon: const Icon(Icons.person_add_alt_1_rounded, color: Colors.black, size: 17),
                       label: const Text(
                         'New Registration',
                         style: TextStyle(
                           color: Colors.black,
                           fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                          fontSize: 13.5,
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.black,
                         elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 14),
+                    const SizedBox(width: 10),
 
                     OutlinedButton.icon(
                       onPressed: () => _openCollectPayment(context),
-                      icon: const Icon(Icons.credit_card_rounded, color: AppColors.primary, size: 18),
+                      icon: const Icon(Icons.credit_card_rounded, color: AppColors.primary, size: 17),
                       label: const Text(
                         'Collect Payment',
                         style: TextStyle(
                           color: AppColors.primary,
                           fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                          fontSize: 13.5,
                         ),
                       ),
                       style: OutlinedButton.styleFrom(
                         backgroundColor: AppColors.surfaceLight,
                         side: const BorderSide(color: AppColors.primary, width: 1.5),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 14),
+                    const SizedBox(width: 10),
 
                     OutlinedButton.icon(
                       onPressed: () => _openTabletKioskDialog(context),
                       icon: Icon(
                         Icons.tablet_mac_rounded,
                         color: _hasConnectedTablet ? AppColors.primary : const Color(0xFFFF1744),
-                        size: 18,
+                        size: 17,
                       ),
                       label: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -332,10 +342,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             style: TextStyle(
                               color: _hasConnectedTablet ? AppColors.primary : const Color(0xFFFF1744),
                               fontWeight: FontWeight.bold,
-                              fontSize: 14,
+                              fontSize: 13.5,
                             ),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 7),
                           Container(
                             width: 8,
                             height: 8,
@@ -361,7 +371,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           color: _hasConnectedTablet ? AppColors.primary : const Color(0xFFFF1744),
                           width: 1.5,
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
