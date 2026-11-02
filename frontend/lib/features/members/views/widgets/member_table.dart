@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:gym_system/core/constants/app_settings.dart';
 import 'package:gym_system/features/members/models/member_model.dart';
@@ -310,15 +311,31 @@ class MemberTable extends StatelessWidget {
             onPressed: () {
               Navigator.pop(context);
               provider.deleteMember(member.id);
-              ScaffoldMessenger.of(context).showSnackBar(
+              final messenger = ScaffoldMessenger.of(context);
+              messenger.clearSnackBars();
+              messenger.showSnackBar(
                 SnackBar(
-                  content: Text('${member.name} deleted'),
+                  duration: const Duration(seconds: 5),
+                  backgroundColor: const Color(0xFF161B22),
+                  behavior: SnackBarBehavior.floating,
+                  width: 460,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: const BorderSide(color: AppColors.border, width: 1.2),
+                  ),
+                  content: _UndoDeleteSnackBarContent(
+                    memberName: member.name,
+                    totalSeconds: 5,
+                  ),
                   action: SnackBarAction(
                     label: 'UNDO',
                     textColor: AppColors.primary,
-                    onPressed: () => provider.undoDelete(),
+                    onPressed: () {
+                      provider.undoDelete();
+                      messenger.hideCurrentSnackBar();
+                    },
                   ),
-                  behavior: SnackBarBehavior.floating,
                 ),
               );
             },
@@ -327,6 +344,114 @@ class MemberTable extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _UndoDeleteSnackBarContent extends StatefulWidget {
+  final String memberName;
+  final int totalSeconds;
+
+  const _UndoDeleteSnackBarContent({
+    required this.memberName,
+    this.totalSeconds = 5,
+  });
+
+  @override
+  State<_UndoDeleteSnackBarContent> createState() => _UndoDeleteSnackBarContentState();
+}
+
+class _UndoDeleteSnackBarContentState extends State<_UndoDeleteSnackBarContent> {
+  late int _remaining;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _remaining = widget.totalSeconds;
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      if (_remaining > 1) {
+        setState(() => _remaining--);
+      } else {
+        t.cancel();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.delete_sweep_rounded, color: AppColors.error, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '${widget.memberName} deleted',
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppColors.primary.withValues(alpha: 0.5)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.timer_outlined, color: AppColors.primary, size: 12),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${_remaining}s',
+                    style: const TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(2),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 1.0, end: 0.0),
+            duration: Duration(seconds: widget.totalSeconds),
+            builder: (context, value, child) {
+              return LinearProgressIndicator(
+                value: value,
+                minHeight: 2.5,
+                backgroundColor: Colors.white12,
+                valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }

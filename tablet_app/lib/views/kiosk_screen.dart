@@ -136,19 +136,20 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
     Uint8List? verificationPhotoBytes;
 
     // For Due (Orange), Visitor (Blue), and Expired (Red):
-    // Show the status color screen & ask user to "Stay Still" while taking verification photo!
+    // Show status screen & wait 5 seconds with countdown before taking verification photo!
     if (needsPhoto) {
       setState(() {
         _isCapturingPhoto = true;
-        _photoCountdown = 2;
+        _photoCountdown = 5;
       });
-      await Future.delayed(const Duration(milliseconds: 650));
-      if (!mounted) return;
-      setState(() => _photoCountdown = 1);
-      await Future.delayed(const Duration(milliseconds: 650));
+      for (int i = 5; i >= 1; i--) {
+        if (!mounted) return;
+        setState(() => _photoCountdown = i);
+        await Future.delayed(const Duration(seconds: 1));
+      }
       if (!mounted) return;
 
-      // Capture live frame after user stays still
+      // Capture live frame after 5 seconds wait
       verificationPhotoBytes = await _captureCameraFallback() ?? capturedImage;
       if (mounted) {
         setState(() => _isCapturingPhoto = false);
@@ -951,21 +952,41 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                                     painter: _ReticlePainter(color: activeThemeColor),
                                   ),
 
-                                  // Laser scan line or photo verification countdown
+                                  // Photo verification 5-second countdown overlay
                                   if (_isCapturingPhoto)
                                     Container(
-                                      color: Colors.black.withValues(alpha: 0.85),
+                                      color: Colors.black.withValues(alpha: 0.5),
                                       alignment: Alignment.center,
                                       padding: const EdgeInsets.all(16),
                                       child: Column(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Icon(
-                                            Icons.camera_alt_rounded,
-                                            color: activeThemeColor,
-                                            size: 38,
+                                          Container(
+                                            width: 58,
+                                            height: 58,
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: Colors.black.withValues(alpha: 0.7),
+                                              border: Border.all(color: activeThemeColor, width: 3),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: activeThemeColor.withValues(alpha: 0.4),
+                                                  blurRadius: 14,
+                                                  spreadRadius: 2,
+                                                ),
+                                              ],
+                                            ),
+                                            alignment: Alignment.center,
+                                            child: Text(
+                                              '$_photoCountdown',
+                                              style: TextStyle(
+                                                color: activeThemeColor,
+                                                fontWeight: FontWeight.w900,
+                                                fontSize: 28,
+                                              ),
+                                            ),
                                           ),
-                                          const SizedBox(height: 8),
+                                          const SizedBox(height: 10),
                                           Container(
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 10,
@@ -998,7 +1019,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                                             const SizedBox(height: 4),
                                           ],
                                           Text(
-                                            'HOLD STILL • $_photoCountdown',
+                                            'HOLD STILL • PHOTO IN ${_photoCountdown}s',
                                             textAlign: TextAlign.center,
                                             style: TextStyle(
                                               color: activeThemeColor,
@@ -1088,7 +1109,7 @@ class _KioskScreenState extends State<KioskScreen> with SingleTickerProviderStat
                                 Flexible(
                                   child: Text(
                                     _isCapturingPhoto
-                                        ? 'HOLD STILL — CAPTURING VERIFICATION PHOTO...'
+                                        ? 'LOOK AT CAMERA — PHOTO IN ${_photoCountdown}s...'
                                         : 'Align Member / Visitor Pass QR in Frame',
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
