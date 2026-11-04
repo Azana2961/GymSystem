@@ -408,10 +408,43 @@ class KioskSyncService extends ChangeNotifier {
     }
   }
 
+  Future<void> _sendHeartbeat() async {
+    if (serverUrl.isEmpty) return;
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$serverUrl/api/tablet/heartbeat'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'device_id': _storage.deviceId,
+              'device_name': _storage.deviceName,
+              'battery_level': 100,
+              'app_version': '2.2.0-adaptive',
+            }),
+          )
+          .timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        if (_storage.pendingScansCount > 0) {
+          await flushOfflineScans();
+        }
+      } else {
+        _isOnline = false;
+        notifyListeners();
+        _scheduleReconnect();
+      }
+    } catch (_) {
+      _isOnline = false;
+      notifyListeners();
+      _scheduleReconnect();
+    }
+  }
+
   void _startHeartbeat() {
     int heartbeatCount = 0;
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(const Duration(seconds: 25), (_) async {
+    // Immediate heartbeat upon connection so PC dashboard indicator turns yellow in real-time
+    _sendHeartbeat();
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 20), (_) async {
       if (!_isOnline) {
         await connect();
         return;
@@ -423,33 +456,7 @@ class KioskSyncService extends ChangeNotifier {
         await syncMembersRoster();
       }
 
-      try {
-        final res = await http
-            .post(
-              Uri.parse('$serverUrl/api/tablet/heartbeat'),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({
-                'device_id': _storage.deviceId,
-                'device_name': _storage.deviceName,
-                'battery_level': 100,
-                'app_version': '2.2.0-adaptive',
-              }),
-            )
-            .timeout(const Duration(seconds: 3));
-        if (res.statusCode == 200) {
-          if (_storage.pendingScansCount > 0) {
-            await flushOfflineScans();
-          }
-        } else {
-          _isOnline = false;
-          notifyListeners();
-          _scheduleReconnect();
-        }
-      } catch (_) {
-        _isOnline = false;
-        notifyListeners();
-        _scheduleReconnect();
-      }
+      await _sendHeartbeat();
     });
   }
 

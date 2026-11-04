@@ -360,11 +360,19 @@ app.post('/api/attendance/scan', (req, res) => {
     const dueAmt = Number(member.due_amount || 0);
     let status = isVisitorMember ? 'visitor' : (dueAmt > 0 ? 'due' : member.status);
     const now = new Date();
-    const expiry = new Date(member.expiry_date);
+    let isExpired = false;
+    if (member.expiry_date) {
+      const expParts = String(member.expiry_date).split('T')[0].split('-').map(Number);
+      if (expParts.length === 3) {
+        const endOfExpiryDay = new Date(expParts[0], expParts[1] - 1, expParts[2], 23, 59, 59, 999);
+        isExpired = endOfExpiryDay < now;
+      }
+    }
     if (!isVisitorMember) {
-      if (expiry < now) {
+      if (isExpired) {
         status = 'expired';
       } else if (status !== 'due') {
+        const expiry = new Date(member.expiry_date);
         const daysLeft = Math.ceil((expiry - now) / 86400000);
         if (daysLeft <= 5) {
           status = 'due';
@@ -480,6 +488,32 @@ app.post('/api/attendance/batch', (req, res) => {
   }
 });
 
+function calculatePlanExpiry(startDate = new Date(), planName = '') {
+  const clean = String(planName || '').trim().toLowerCase();
+  if (clean.includes('visitor') || clean.includes('guest') || clean.includes('day')) {
+    const nextDay = new Date(startDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+    return nextDay.toISOString().split('T')[0];
+  }
+
+  let months = 1;
+  if (clean.includes('silver') || clean.includes('quarter') || clean.includes('3 month')) {
+    months = 3;
+  } else if (clean.includes('gold') || clean.includes('half') || clean.includes('6 month')) {
+    months = 6;
+  } else if (clean.includes('platinum') || clean.includes('vip') || clean.includes('annual') || clean.includes('year') || clean.includes('12 month')) {
+    months = 12;
+  }
+
+  const d = new Date(startDate);
+  const startDay = d.getDate();
+  d.setMonth(d.getMonth() + months);
+  if (d.getDate() !== startDay) {
+    d.setDate(0);
+  }
+  return d.toISOString().split('T')[0];
+}
+
 // ── 3. Member Registration: POST /api/members/register ────────────────────
 app.post('/api/members/register', async (req, res) => {
   try {
@@ -525,7 +559,7 @@ app.post('/api/members/register', async (req, res) => {
       phone: (phone || '').trim(),
       email: (email || '').trim(),
       plan: plan || 'Monthly',
-      expiry_date: expiry_date || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+      expiry_date: expiry_date || calculatePlanExpiry(new Date(), plan),
       status: resolvedStatus,
       qr_token: qrToken,
       qr_path: url,
@@ -693,10 +727,19 @@ app.get('/api/stats', (req, res) => {
     const dueAmt = Number(m.due_amount || 0);
     totalDueAmount += dueAmt;
 
+    let isExpired = false;
+    if (m.expiry_date) {
+      const expParts = String(m.expiry_date).split('T')[0].split('-').map(Number);
+      if (expParts.length === 3) {
+        const endOfExpiryDay = new Date(expParts[0], expParts[1] - 1, expParts[2], 23, 59, 59, 999);
+        isExpired = endOfExpiryDay < now;
+      }
+    }
+
     if (isVis) {
       visitors++;
       active++;
-    } else if (new Date(m.expiry_date) < now || m.status === 'expired') {
+    } else if (isExpired || m.status === 'expired') {
       expired++;
     } else if (m.status === 'due' || dueAmt > 0) {
       due++;

@@ -280,10 +280,11 @@ class MemberTable extends StatelessWidget {
         );
         break;
       case 'renew':
+        final now = DateTime.now();
         provider.updateMember(member.copyWith(
-          expiryDate: member.expiryDate.isBefore(DateTime.now())
-              ? DateTime.now().add(const Duration(days: 30))
-              : member.expiryDate.add(const Duration(days: 30)),
+          expiryDate: member.expiryDate.isBefore(now)
+              ? AppSettings.instance.calculateExpiryDate(now, member.plan)
+              : AppSettings.instance.calculateExpiryDate(member.expiryDate, member.plan),
         ));
         break;
       case 'toggle_status':

@@ -31,7 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     _membersProvider.addListener(_onMembersUpdated);
     _fetchStats();
-    _statsPoller = Timer.periodic(const Duration(seconds: 4), (_) => _fetchStats());
+    _statsPoller = Timer.periodic(const Duration(seconds: 2), (_) => _fetchStats());
   }
 
   void _onMembersUpdated() {
@@ -83,7 +83,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (!context.mounted) return;
 
-    showDialog(
+    await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
@@ -186,6 +186,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
     );
+    if (mounted) {
+      _fetchStats();
+    }
   }
 
   @override

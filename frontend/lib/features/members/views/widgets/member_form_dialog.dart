@@ -62,8 +62,7 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
     } else {
       _startDate = DateTime.now();
       _selectedPlan = _plans.first;
-      final days = _settings.getPlanDurationDays(_selectedPlan);
-      _expiryDate = _startDate!.add(Duration(days: days));
+      _expiryDate = _settings.calculateExpiryDate(_startDate!, _selectedPlan);
     }
   }
 
@@ -115,8 +114,7 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
       } else {
         _includeJoiningFee = _settings.enableJoiningFee;
         if (_startDate != null) {
-          final days = _settings.getPlanDurationDays(_selectedPlan);
-          _expiryDate = _startDate!.add(Duration(days: days));
+          _expiryDate = _settings.calculateExpiryDate(_startDate!, _selectedPlan);
         }
       }
     });
@@ -127,8 +125,7 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
     setState(() {
       _selectedPlan = newPlan;
       if (_startDate != null) {
-        final days = _settings.getPlanDurationDays(_selectedPlan);
-        _expiryDate = _startDate!.add(Duration(days: days));
+        _expiryDate = _settings.calculateExpiryDate(_startDate!, _selectedPlan);
       }
     });
   }
@@ -230,8 +227,7 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
       setState(() {
         if (isStart) {
           _startDate = picked;
-          final days = _settings.getPlanDurationDays(_selectedPlan);
-          _expiryDate = picked.add(Duration(days: days));
+          _expiryDate = _settings.calculateExpiryDate(picked, _selectedPlan);
         } else {
           _expiryDate = picked;
         }

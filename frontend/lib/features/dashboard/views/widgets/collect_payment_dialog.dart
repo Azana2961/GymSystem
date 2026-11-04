@@ -135,12 +135,11 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
     final hasDue = _remainingUdhaar > 0;
 
     // Update member status, plan and expiry in session data & SQLite database
-    final planDays = _settings.getPlanDurationDays(_selectedPlan);
     final now = DateTime.now();
     final DateTime newExpiry = _includePlanRenewal
         ? (member.expiryDate.isBefore(now)
-            ? now.add(Duration(days: planDays))
-            : member.expiryDate.add(Duration(days: planDays)))
+            ? _settings.calculateExpiryDate(now, _selectedPlan)
+            : _settings.calculateExpiryDate(member.expiryDate, _selectedPlan))
         : member.expiryDate;
 
     final updated = member.copyWith(

@@ -293,6 +293,50 @@ class AppSettings extends ChangeNotifier {
     return 30;
   }
 
+  /// Calculates the exact calendar expiry date for a subscription plan.
+  /// If a month has 31 days (or 28/29 days in Feb), it accurately jumps
+  /// to the matching day next month instead of cutting off at exactly 30 days.
+  DateTime calculateExpiryDate(DateTime startDate, String planName) {
+    final clean = planName.trim().toLowerCase();
+    if (clean.contains('visitor') || clean.contains('guest') || clean.contains('day pass')) {
+      return startDate.add(const Duration(days: 1));
+    }
+
+    int months = 1;
+    if (clean.contains('silver') || clean.contains('quarter') || clean.contains('3 month')) {
+      months = 3;
+    } else if (clean.contains('gold') || clean.contains('half') || clean.contains('6 month')) {
+      months = 6;
+    } else if (clean.contains('platinum') || clean.contains('vip') || clean.contains('annual') || clean.contains('year') || clean.contains('12 month')) {
+      months = 12;
+    } else {
+      for (final p in plans) {
+        if (p.name.toLowerCase() == clean || clean.contains(p.id)) {
+          if (p.durationDays >= 350) {
+            months = 12;
+          } else if (p.durationDays >= 170) {
+            months = 6;
+          } else if (p.durationDays >= 80) {
+            months = 3;
+          } else if (p.durationDays >= 25) {
+            months = (p.durationDays / 30).round().clamp(1, 12);
+          } else {
+            return startDate.add(Duration(days: p.durationDays));
+          }
+          break;
+        }
+      }
+    }
+
+    // Calendar month arithmetic: preserves day-of-month and handles month boundaries
+    final newYear = startDate.year + ((startDate.month + months - 1) ~/ 12);
+    final newMonth = ((startDate.month + months - 1) % 12) + 1;
+    final maxDaysInNewMonth = DateTime(newYear, newMonth + 1, 0).day;
+    final newDay = startDate.day > maxDaysInNewMonth ? maxDaysInNewMonth : startDate.day;
+
+    return DateTime(newYear, newMonth, newDay, startDate.hour, startDate.minute, startDate.second);
+  }
+
   static String formatAmount(num amount) {
     final parts = amount.toInt().toString().split('');
     final buffer = StringBuffer();
