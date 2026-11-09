@@ -18,6 +18,13 @@ class GymSystemApp extends StatelessWidget {
       title: 'Lá Fitness',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
+      builder: (context, child) {
+        final mq = MediaQuery.of(context);
+        return MediaQuery(
+          data: mq.copyWith(accessibleNavigation: false),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       home: const MainLayout(),
     );
   }

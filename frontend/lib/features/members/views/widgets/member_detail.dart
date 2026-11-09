@@ -58,15 +58,24 @@ class _MemberDetailState extends State<MemberDetail> {
     }
   }
 
+  MemberModel get _liveMember =>
+      widget.provider.allMembers.where((m) => m.id == widget.member.id).firstOrNull ?? widget.member;
+
+  bool get _isAlreadyPaid {
+    final m = _liveMember;
+    return !m.isVisitor && !m.isExpired && !m.isPaymentPending && m.dueAmount <= 0;
+  }
+
   void _saveNewNote() {
     final text = _noteController.text.trim();
     if (text.isEmpty) return;
 
-    final existing = widget.member.notes?.trim() ?? '';
+    final member = _liveMember;
+    final existing = member.notes?.trim() ?? '';
     final timestamp = DateTime.now().toString().substring(0, 16);
     final combined = existing.isEmpty ? '[$timestamp] $text' : '$existing\n[$timestamp] $text';
 
-    final updated = widget.member.copyWith(notes: combined);
+    final updated = member.copyWith(notes: combined);
     widget.provider.updateMember(updated);
     _noteController.clear();
 
@@ -81,146 +90,167 @@ class _MemberDetailState extends State<MemberDetail> {
 
   @override
   Widget build(BuildContext context) {
-    final member = widget.member;
-    final daysUntilExpiry = member.expiryDate.difference(DateTime.now()).inDays;
-    final isExpired = daysUntilExpiry < 0;
+    return AnimatedBuilder(
+      animation: widget.provider,
+      builder: (context, _) {
+        final member = _liveMember;
+        final isAlreadyPaid = _isAlreadyPaid;
+        final daysUntilExpiry = member.expiryDate.difference(DateTime.now()).inDays;
+        final isExpired = daysUntilExpiry < 0;
 
-    String status = 'Active';
-    Color statusColor = AppColors.success;
-    if (member.isPaymentPending || isExpired) {
-      status = 'Overdue / Expired';
-      statusColor = AppColors.error;
-    } else if (daysUntilExpiry <= 5) {
-      status = 'Expiring Soon';
-      statusColor = AppColors.warning;
-    }
+        String status = 'Active';
+        Color statusColor = AppColors.success;
+        if (member.isPaymentPending || member.dueAmount > 0 || isExpired) {
+          status = 'Overdue / Expired';
+          statusColor = AppColors.error;
+        } else if (daysUntilExpiry <= 7) {
+          status = 'Expiring Soon';
+          statusColor = AppColors.warning;
+        }
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.surface,
-        elevation: 1,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: widget.onClose,
-          tooltip: 'Back to Members',
-        ),
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(member.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(width: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: statusColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: statusColor.withValues(alpha: 0.4)),
-              ),
-              child: Text(
-                status,
-                style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 12),
-              ),
+        return Scaffold(
+          backgroundColor: AppColors.background,
+          appBar: AppBar(
+            backgroundColor: AppColors.surface,
+            elevation: 1,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: widget.onClose,
+              tooltip: 'Back to Members',
             ),
-          ],
-        ),
-        actions: [
-          TextButton.icon(
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => MemberFormDialog(provider: widget.provider, memberToEdit: member),
-              );
-            },
-            icon: const Icon(Icons.edit, color: AppColors.textPrimary, size: 18),
-            label: const Text('Edit Profile', style: TextStyle(color: AppColors.textPrimary)),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => ReceiptQrDialog(
-                  member: member,
-                  planFee: AppSettings.instance.getPlanPrice(member.plan),
-                  admissionFee: 0.0,
-                  discount: 0.0,
-                  totalPaid: member.paidAmount > 0 ? member.paidAmount : AppSettings.instance.getPlanPrice(member.plan),
-                  paymentMethod: 'Active',
-                  isNewRegistration: false,
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(member.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: statusColor.withValues(alpha: 0.4)),
+                  ),
+                  child: Text(
+                    status,
+                    style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
                 ),
-              );
-            },
-            icon: const Icon(Icons.badge_rounded, size: 16, color: AppColors.primary),
-            label: const Text('Member Pass', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 13)),
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: AppColors.primary, width: 1.2),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ],
             ),
+            actions: [
+              TextButton.icon(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => MemberFormDialog(provider: widget.provider, memberToEdit: member),
+                  );
+                },
+                icon: const Icon(Icons.edit, color: AppColors.textPrimary, size: 18),
+                label: const Text('Edit Profile', style: TextStyle(color: AppColors.textPrimary)),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => ReceiptQrDialog(
+                      member: member,
+                      planFee: AppSettings.instance.getPlanPrice(member.plan),
+                      admissionFee: 0.0,
+                      discount: 0.0,
+                      totalPaid: member.paidAmount > 0 ? member.paidAmount : AppSettings.instance.getPlanPrice(member.plan),
+                      paymentMethod: 'Active',
+                      isNewRegistration: false,
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.badge_rounded, size: 16, color: AppColors.primary),
+                label: const Text('Member Pass', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 13)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: AppColors.primary, width: 1.2),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (!member.isVisitor)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: ElevatedButton.icon(
+                    onPressed: isAlreadyPaid
+                        ? null
+                        : () {
+                            showDialog(
+                              context: context,
+                              builder: (_) => CollectPaymentDialog(initialMember: member),
+                            );
+                          },
+                    icon: Icon(
+                      isAlreadyPaid ? Icons.check_circle_rounded : Icons.payments_rounded,
+                      color: isAlreadyPaid ? AppColors.textMuted : Colors.black,
+                      size: 18,
+                    ),
+                    label: Text(
+                      isAlreadyPaid ? 'Fee Paid (This Month)' : 'Collect Fee / Renew',
+                      style: TextStyle(
+                        color: isAlreadyPaid ? AppColors.textMuted : Colors.black,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.black,
+                      disabledBackgroundColor: Colors.white.withValues(alpha: 0.1),
+                      disabledForegroundColor: AppColors.textMuted,
+                    ),
+                  ),
+                ),
+              const SizedBox(width: 16),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: widget.onClose,
+                tooltip: 'Close',
+              ),
+              const SizedBox(width: 16),
+            ],
           ),
-          const SizedBox(width: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: ElevatedButton.icon(
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (_) => CollectPaymentDialog(initialMember: member),
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth > 950;
+                if (!isWide) {
+                  return Column(
+                    children: [
+                      _buildLeftColumn(context, statusColor),
+                      const SizedBox(height: 24),
+                      _buildMiddleColumn(context),
+                      const SizedBox(height: 24),
+                      _buildRightColumn(),
+                    ],
+                  );
+                }
+
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 3, child: _buildLeftColumn(context, statusColor)),
+                    const SizedBox(width: 24),
+                    Expanded(flex: 4, child: _buildMiddleColumn(context)),
+                    const SizedBox(width: 24),
+                    Expanded(flex: 3, child: _buildRightColumn()),
+                  ],
                 );
               },
-              icon: const Icon(Icons.payments_rounded, color: Colors.black, size: 18),
-              label: const Text('Collect Fee / Renew', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.black,
-              ),
             ),
           ),
-          const SizedBox(width: 16),
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: widget.onClose,
-            tooltip: 'Close',
-          ),
-          const SizedBox(width: 16),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isWide = constraints.maxWidth > 950;
-            if (!isWide) {
-              return Column(
-                children: [
-                  _buildLeftColumn(context, statusColor),
-                  const SizedBox(height: 24),
-                  _buildMiddleColumn(context),
-                  const SizedBox(height: 24),
-                  _buildRightColumn(),
-                ],
-              );
-            }
-
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(flex: 3, child: _buildLeftColumn(context, statusColor)),
-                const SizedBox(width: 24),
-                Expanded(flex: 4, child: _buildMiddleColumn(context)),
-                const SizedBox(width: 24),
-                Expanded(flex: 3, child: _buildRightColumn()),
-              ],
-            );
-          },
-        ),
-      ),
+        );
+      },
     );
   }
 
   Widget _buildLeftColumn(BuildContext context, Color statusColor) {
-    final member = widget.member;
+    final member = _liveMember;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -367,7 +397,8 @@ class _MemberDetailState extends State<MemberDetail> {
   }
 
   Widget _buildMiddleColumn(BuildContext context) {
-    final member = widget.member;
+    final member = _liveMember;
+    final isAlreadyPaid = _isAlreadyPaid;
     final daysUntilExpiry = member.expiryDate.difference(DateTime.now()).inDays;
     final isExpired = daysUntilExpiry < 0;
 
@@ -549,24 +580,32 @@ class _MemberDetailState extends State<MemberDetail> {
                 // Action to collect fee or view receipt
                 Row(
                   children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          showDialog(
-                            context: context,
-                            builder: (_) => CollectPaymentDialog(initialMember: member),
-                          );
-                        },
-                        icon: const Icon(Icons.payment_rounded, size: 16),
-                        label: const Text('Collect / Renew Fee'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.primary,
-                          side: const BorderSide(color: AppColors.primary),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    if (!member.isVisitor)
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: isAlreadyPaid
+                              ? null
+                              : () {
+                                  showDialog(
+                                    context: context,
+                                    builder: (_) => CollectPaymentDialog(initialMember: member),
+                                  );
+                                },
+                          icon: Icon(
+                            isAlreadyPaid ? Icons.check_circle_rounded : Icons.payment_rounded,
+                            size: 16,
+                            color: isAlreadyPaid ? AppColors.textMuted : AppColors.primary,
+                          ),
+                          label: Text(isAlreadyPaid ? 'Fee Paid (This Month)' : 'Collect / Renew Fee'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.primary,
+                            disabledForegroundColor: AppColors.textMuted,
+                            side: BorderSide(color: isAlreadyPaid ? AppColors.border : AppColors.primary),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
                         ),
                       ),
-                    ),
                     if (member.paidAmount > 0) ...[
                       const SizedBox(width: 10),
                       ElevatedButton.icon(
@@ -604,7 +643,7 @@ class _MemberDetailState extends State<MemberDetail> {
   }
 
   Widget _buildRightColumn() {
-    final member = widget.member;
+    final member = _liveMember;
     final now = DateTime.now();
 
     final thisMonthScans = _attendanceRecords.where((r) {

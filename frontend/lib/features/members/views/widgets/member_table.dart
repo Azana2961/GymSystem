@@ -5,6 +5,7 @@ import 'package:gym_system/features/members/models/member_model.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/features/members/providers/members_provider.dart';
 import 'package:gym_system/features/members/views/widgets/member_form_dialog.dart';
+import 'package:gym_system/features/dashboard/views/widgets/collect_payment_dialog.dart';
 
 class MemberTable extends StatelessWidget {
   final MembersProvider provider;
@@ -182,19 +183,32 @@ class MemberTable extends StatelessWidget {
                                     onSelected: (value) {
                                       _handleAction(context, value, member);
                                     },
-                                    itemBuilder: (context) => [
-                                      const PopupMenuItem(value: 'view', child: Text('View Details')),
-                                      const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                                      const PopupMenuItem(value: 'renew', child: Text('Renew')),
-                                      PopupMenuItem(
-                                        value: 'toggle_status',
-                                        child: Text(member.isActive ? 'Deactivate' : 'Activate'),
-                                      ),
-                                      const PopupMenuItem(
-                                        value: 'delete',
-                                        child: Text('Delete', style: TextStyle(color: AppColors.error)),
-                                      ),
-                                    ],
+                                    itemBuilder: (context) {
+                                      final bool isPaidThisMonth = !member.isVisitor && !isExpired && !hasUdhaar;
+                                      return [
+                                        const PopupMenuItem(value: 'view', child: Text('View Details')),
+                                        const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                                        if (!member.isVisitor)
+                                          PopupMenuItem(
+                                            value: 'renew',
+                                            enabled: !isPaidThisMonth,
+                                            child: Text(
+                                              isPaidThisMonth ? 'Fee Paid (This Month)' : 'Collect Fee / Renew',
+                                              style: TextStyle(
+                                                color: isPaidThisMonth ? AppColors.textMuted : AppColors.textPrimary,
+                                              ),
+                                            ),
+                                          ),
+                                        PopupMenuItem(
+                                          value: 'toggle_status',
+                                          child: Text(member.isActive ? 'Deactivate' : 'Activate'),
+                                        ),
+                                        const PopupMenuItem(
+                                          value: 'delete',
+                                          child: Text('Delete', style: TextStyle(color: AppColors.error)),
+                                        ),
+                                      ];
+                                    },
                                   ),
                                 ),
                               ],
@@ -280,12 +294,10 @@ class MemberTable extends StatelessWidget {
         );
         break;
       case 'renew':
-        final now = DateTime.now();
-        provider.updateMember(member.copyWith(
-          expiryDate: member.expiryDate.isBefore(now)
-              ? AppSettings.instance.calculateExpiryDate(now, member.plan)
-              : AppSettings.instance.calculateExpiryDate(member.expiryDate, member.plan),
-        ));
+        showDialog(
+          context: context,
+          builder: (_) => CollectPaymentDialog(initialMember: member),
+        );
         break;
       case 'toggle_status':
         provider.updateMember(member.copyWith(isActive: !member.isActive));
@@ -296,30 +308,32 @@ class MemberTable extends StatelessWidget {
     }
   }
 
-  void _showDeleteConfirm(BuildContext context, MemberModel member) {
+  void _showDeleteConfirm(BuildContext parentContext, MemberModel member) {
+    final messenger = ScaffoldMessenger.maybeOf(parentContext);
     showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
+      context: parentContext,
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: AppColors.surface,
         title: const Text('Delete Member'),
         content: Text('Are you sure you want to delete ${member.name}?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               provider.deleteMember(member.id);
-              final messenger = ScaffoldMessenger.of(context);
+              if (messenger == null) return;
               messenger.clearSnackBars();
-              messenger.showSnackBar(
+              late final ScaffoldFeatureController<SnackBar, SnackBarClosedReason> controller;
+              controller = messenger.showSnackBar(
                 SnackBar(
-                  duration: const Duration(seconds: 5),
+                  duration: const Duration(seconds: 4),
                   backgroundColor: const Color(0xFF161B22),
                   behavior: SnackBarBehavior.floating,
-                  width: 460,
+                  width: 480,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -327,18 +341,28 @@ class MemberTable extends StatelessWidget {
                   ),
                   content: _UndoDeleteSnackBarContent(
                     memberName: member.name,
-                    totalSeconds: 5,
-                  ),
-                  action: SnackBarAction(
-                    label: 'UNDO',
-                    textColor: AppColors.primary,
-                    onPressed: () {
+                    totalSeconds: 4,
+                    onUndo: () {
                       provider.undoDelete();
-                      messenger.hideCurrentSnackBar();
+                      try {
+                        controller.close();
+                      } catch (_) {}
+                      messenger.clearSnackBars();
+                    },
+                    onDismiss: () {
+                      try {
+                        controller.close();
+                      } catch (_) {}
+                      messenger.clearSnackBars();
                     },
                   ),
                 ),
               );
+              Future.delayed(const Duration(milliseconds: 4100), () {
+                try {
+                  controller.close();
+                } catch (_) {}
+              });
             },
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
             child: const Text('Delete', style: TextStyle(color: Colors.white)),
@@ -352,10 +376,14 @@ class MemberTable extends StatelessWidget {
 class _UndoDeleteSnackBarContent extends StatefulWidget {
   final String memberName;
   final int totalSeconds;
+  final VoidCallback onUndo;
+  final VoidCallback onDismiss;
 
   const _UndoDeleteSnackBarContent({
     required this.memberName,
-    this.totalSeconds = 5,
+    this.totalSeconds = 4,
+    required this.onUndo,
+    required this.onDismiss,
   });
 
   @override
@@ -379,6 +407,7 @@ class _UndoDeleteSnackBarContentState extends State<_UndoDeleteSnackBarContent> 
         setState(() => _remaining--);
       } else {
         t.cancel();
+        widget.onDismiss();
       }
     });
   }
@@ -432,6 +461,29 @@ class _UndoDeleteSnackBarContentState extends State<_UndoDeleteSnackBarContent> 
                     ),
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: widget.onUndo,
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                'UNDO',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+            ),
+            const SizedBox(width: 4),
+            InkWell(
+              onTap: widget.onDismiss,
+              borderRadius: BorderRadius.circular(4),
+              child: const Padding(
+                padding: EdgeInsets.all(4.0),
+                child: Icon(Icons.close_rounded, size: 16, color: AppColors.textSecondary),
               ),
             ),
           ],

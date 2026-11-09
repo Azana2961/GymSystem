@@ -168,14 +168,20 @@ class WhatsAppService {
   formatPhone(raw) {
     if (!raw) return '';
     let clean = String(raw).replace(/[^0-9+]/g, '');
-    if (clean.startsWith('03')) {
-      clean = '92' + clean.slice(1);
+    if (clean.startsWith('0092')) {
+      clean = '92' + clean.slice(4);
     } else if (clean.startsWith('+92')) {
       clean = '92' + clean.slice(3);
+    } else if (clean.startsWith('03') && clean.length === 11) {
+      clean = '92' + clean.slice(1);
+    } else if (clean.startsWith('03')) {
+      clean = '92' + clean.slice(1);
+    } else if (clean.startsWith('3') && clean.length === 10) {
+      clean = '92' + clean;
     } else if (clean.startsWith('+')) {
       clean = clean.slice(1);
     }
-    return clean;
+    return clean.replace(/[^0-9]/g, '');
   }
 
   /**
@@ -230,9 +236,6 @@ class WhatsAppService {
     if (!formattedPhone) {
       throw new Error('Valid recipient phone number is required');
     }
-    if ((!message_text || !message_text.trim()) && !image_base64 && !image_path) {
-      throw new Error('Message text or image is required');
-    }
 
     let resolvedImagePath = image_path;
 
@@ -249,8 +252,12 @@ class WhatsAppService {
       }
     }
 
-    // Fallback: for welcome/pass messages, attach the member's QR image if no pass image was provided
-    if (!resolvedImagePath && member_id && (message_type === 'welcome' || message_type === 'pass_card')) {
+    // Fallback: for welcome/receipt/pass messages, attach the member's QR image if no pass image was provided
+    if (
+      !resolvedImagePath &&
+      member_id &&
+      (message_type === 'welcome' || message_type === 'payment_receipt' || message_type === 'pass_card')
+    ) {
       try {
         const m = db.getMemberById(member_id) || db.getMemberByToken(member_id);
         if (m && m.qr_path) {
@@ -259,7 +266,29 @@ class WhatsAppService {
       } catch (_) {}
     }
 
-    const rendered = message_text ? this.parseSpintax(message_text) : '';
+    let rendered = message_text ? this.parseSpintax(message_text) : '';
+
+    // If neither text nor image could be resolved, synthesize a fallback receipt/pass text from member record
+    if ((!rendered || !rendered.trim()) && !resolvedImagePath) {
+      const m = member_id ? (db.getMemberById(member_id) || db.getMemberByToken(member_id)) : null;
+      if (m) {
+        rendered = this.renderMessage(
+          '*{gym_name} - Official Membership Pass*\n' +
+            'Member: *{name}* (ID: *{id}*)\n' +
+            'Plan: *{plan}*\n' +
+            'Valid Till: *{expiry_date}*\n' +
+            'Thank you for training with us!',
+          {
+            name: m.name,
+            id: m.id,
+            plan: m.plan,
+            expiry_date: m.expiry_date,
+          }
+        );
+      } else {
+        throw new Error('Message text or image is required');
+      }
+    }
 
     const result = db.enqueueWaMessage({
       member_id,
@@ -366,8 +395,19 @@ class WhatsAppService {
           break;
         }
 
-        // 3. Human Fatigue Cooldown Check
-        if (this.consecutiveSent > 0 && this.consecutiveSent % settings.burst_batch_size === 0) {
+        const isInteractiveReceipt =
+          nextMsg.message_type === 'welcome' ||
+          nextMsg.message_type === 'payment_receipt' ||
+          nextMsg.message_type === 'pass_card' ||
+          nextMsg.message_type === 'real_direct' ||
+          nextMsg.message_type === 'test';
+
+        // 3. Human Fatigue Cooldown Check (only for bulk campaigns, never for single front-desk receipts)
+        if (
+          !isInteractiveReceipt &&
+          this.consecutiveSent > 0 &&
+          this.consecutiveSent % settings.burst_batch_size === 0
+        ) {
           const cooldownSec = settings.cooldown_sec;
           console.log(`[WhatsApp Anti-Ban] Batch fatigue cooldown: resting for ${cooldownSec}s after ${this.consecutiveSent} messages...`);
           this.status = 'cooldown';
@@ -381,8 +421,8 @@ class WhatsAppService {
 
         if (this.isPaused) break;
 
-        // 4. Compute randomized anti-ban delay for this specific message
-        const delayMs = this.computeRandomDelay();
+        // 4. Compute delay: fast 1.0s for front-desk receipts/passes, randomized anti-ban delay for bulk reminders
+        const delayMs = isInteractiveReceipt ? 1000 : this.computeRandomDelay();
         const delaySec = Number((delayMs / 1000).toFixed(1));
 
         this.status = 'waiting';

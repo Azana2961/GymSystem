@@ -79,12 +79,12 @@ class _ReceiptQrDialogState extends State<ReceiptQrDialog> {
   }
 
   Future<String?> _capturePassCardBase64() async {
-    for (int attempt = 0; attempt < 5; attempt++) {
+    for (int attempt = 0; attempt < 6; attempt++) {
       try {
         await WidgetsBinding.instance.endOfFrame;
         final boundary = _passBoundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-        if (boundary != null && !boundary.debugNeedsPaint) {
-          final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+        if (boundary != null) {
+          final ui.Image image = await boundary.toImage(pixelRatio: 2.5);
           final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
           if (byteData != null) {
             final pngBytes = byteData.buffer.asUint8List();
@@ -104,12 +104,16 @@ class _ReceiptQrDialogState extends State<ReceiptQrDialog> {
     final phone = member.phone?.trim() ?? '';
     if (phone.isEmpty) {
       if (!isAuto && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger?.clearSnackBars();
+        messenger?.showSnackBar(
           const SnackBar(
             content: Text('No phone number saved for this member.'),
             backgroundColor: AppColors.error,
+            duration: Duration(seconds: 3),
           ),
         );
+        Future.delayed(const Duration(seconds: 3), () => messenger?.hideCurrentSnackBar());
       }
       return;
     }
@@ -119,7 +123,7 @@ class _ReceiptQrDialogState extends State<ReceiptQrDialog> {
     // 1. Capture the full Digital Membership Pass Card as a high-res PNG image
     final base64PassImage = await _capturePassCardBase64();
 
-    // 2. Send ONLY the full Pass Card image (no text caption) to Backend WhatsApp Engine
+    // 2. Send the full Pass Card image to Backend WhatsApp Engine
     final sentOk = await ApiService.instance.sendWhatsAppMessage(
       memberId: member.id,
       phone: phone,
@@ -134,7 +138,9 @@ class _ReceiptQrDialogState extends State<ReceiptQrDialog> {
       if (sentOk) _hasSentPass = true;
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.clearSnackBars();
+    messenger?.showSnackBar(
       SnackBar(
         backgroundColor: const Color(0xFF1B1B20),
         behavior: SnackBarBehavior.floating,
@@ -156,7 +162,7 @@ class _ReceiptQrDialogState extends State<ReceiptQrDialog> {
             Expanded(
               child: Text(
                 sentOk
-                    ? '⚡ Full Digital Pass Card Image queued for $phone via WhatsApp!'
+                    ? '⚡ Full Digital Pass Card Image sent to $phone via WhatsApp!'
                     : 'Could not reach backend server to send WhatsApp pass image.',
                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
               ),
@@ -166,6 +172,7 @@ class _ReceiptQrDialogState extends State<ReceiptQrDialog> {
         duration: const Duration(seconds: 3),
       ),
     );
+    Future.delayed(const Duration(seconds: 3), () => messenger?.hideCurrentSnackBar());
   }
 
   void _copyPassText(BuildContext context) {
@@ -179,13 +186,16 @@ Amount Paid: Rs. ${AppSettings.formatAmount(totalPaid)} ($paymentMethod)
 QR Check-in Token: ${member.id}
 ''';
     Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.clearSnackBars();
+    messenger?.showSnackBar(
       const SnackBar(
         content: Text('Member Pass details copied to clipboard!'),
         backgroundColor: AppColors.surfaceLight,
         duration: Duration(seconds: 2),
       ),
     );
+    Future.delayed(const Duration(seconds: 2), () => messenger?.hideCurrentSnackBar());
   }
 
   @override

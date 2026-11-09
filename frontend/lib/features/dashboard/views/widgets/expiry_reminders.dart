@@ -186,32 +186,40 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
   }
 
   Future<void> _sendAllReminders() async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
     if (!AppSettings.instance.sendExpiryAlert) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger?.clearSnackBars();
+      messenger?.showSnackBar(
         const SnackBar(
+          duration: Duration(seconds: 3),
           content: Text('Expiry Reminders are turned OFF in Settings. Toggle them ON in Settings to send alerts.'),
           backgroundColor: AppColors.warning,
         ),
       );
+      Future.delayed(const Duration(seconds: 3), () => messenger?.hideCurrentSnackBar());
       return;
     }
     final idleItems = _reminders.where((r) => r.queueState == 'idle').toList();
     if (idleItems.isEmpty) {
+      messenger?.clearSnackBars();
       if (_hasActiveQueue) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger?.showSnackBar(
           const SnackBar(
+            duration: Duration(seconds: 3),
             content: Text('Reminders are already in the live queue and sending!'),
             backgroundColor: AppColors.surfaceLight,
           ),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger?.showSnackBar(
           const SnackBar(
+            duration: Duration(seconds: 3),
             content: Text('No pending reminders to dispatch.'),
             backgroundColor: AppColors.surfaceLight,
           ),
         );
       }
+      Future.delayed(const Duration(seconds: 3), () => messenger?.hideCurrentSnackBar());
       return;
     }
 
@@ -239,10 +247,12 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
     _startLiveQueuePolling();
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    messenger?.clearSnackBars();
+    messenger?.showSnackBar(
       SnackBar(
         backgroundColor: const Color(0xFF1B1B20),
         behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
           side: const BorderSide(color: AppColors.primary, width: 1),
@@ -265,16 +275,21 @@ class _ExpiryRemindersWidgetState extends State<ExpiryRemindersWidget> {
         ),
       ),
     );
+    Future.delayed(const Duration(seconds: 3), () => messenger?.hideCurrentSnackBar());
   }
 
   Future<void> _sendSingle(ReminderItem item) async {
     if (!AppSettings.instance.sendExpiryAlert) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.clearSnackBars();
+      messenger?.showSnackBar(
         const SnackBar(
+          duration: Duration(seconds: 3),
           content: Text('Expiry Reminders are turned OFF in Settings. Toggle them ON in Settings to send alerts.'),
           backgroundColor: AppColors.warning,
         ),
       );
+      Future.delayed(const Duration(seconds: 3), () => messenger?.hideCurrentSnackBar());
       return;
     }
     if (item.queueState != 'idle') return;

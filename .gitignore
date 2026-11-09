@@ -63,3 +63,9 @@ backend/public/qrcodes/*.png
 backend/public/qrcodes/*.jpg
 backend/public/qrcodes/*.jpeg
 !backend/public/qrcodes/.gitkeep
+
+# Installer staging & compiled binaries
+installer/staging/
+installer/*.exe
+installer/*.apk
+*.pkt

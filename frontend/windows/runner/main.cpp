@@ -27,9 +27,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"gym_system", origin, size)) {
+  if (!window.Create(L"Lá Fitness - Gym Management", origin, size)) {
     return EXIT_FAILURE;
   }
+  ::ShowWindow(window.GetHandle(), SW_SHOWMAXIMIZED);
   window.SetQuitOnClose(true);
 
   ::MSG msg;

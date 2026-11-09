@@ -43,11 +43,14 @@ class ApiService {
             final isDue = m['status'] == 'due' || dueAmt > 0;
             final isExpired = m['status'] == 'expired' || expiry.isBefore(DateTime.now());
 
+            final createdAt = DateTime.tryParse(m['created_at']?.toString() ?? '');
+
             return MemberModel(
               id: m['id'] ?? m['qr_token'] ?? 'M000',
               name: m['name'] ?? 'Member',
               plan: m['plan'] ?? 'Basic Plan',
               expiryDate: expiry,
+              startDate: createdAt,
               isPaymentPending: isDue,
               dueAmount: dueAmt,
               paidAmount: paidAmt,
@@ -143,7 +146,8 @@ class ApiService {
         'gender': member.gender,
         'notes': member.notes,
         'due_amount': member.dueAmount,
-        'paid_amount': paidAmount?.toInt() ?? member.paidAmount.toInt(),
+        'paid_amount': member.paidAmount.toInt(),
+        'receipt_amount': paidAmount?.toInt() ?? member.paidAmount.toInt(),
         'send_receipt': sendReceipt,
         'payment_method': paymentMethod,
       });
@@ -227,6 +231,26 @@ class ApiService {
         final data = jsonDecode(body);
         if (data['records'] is List) {
           return (data['records'] as List).cast<Map<String, dynamic>>();
+        }
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+    return [];
+  }
+
+  /// Fetch recent club attendance check-in feed from SQLite
+  Future<List<Map<String, dynamic>>> getAttendanceFeed({int limit = 100}) async {
+    final client = _createClient();
+    try {
+      final request = await client.getUrl(Uri.parse('$baseUrl/api/attendance/feed?limit=$limit'));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final body = await response.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data['feed'] is List) {
+          return List<Map<String, dynamic>>.from(data['feed'] as List);
         }
       }
     } catch (_) {
@@ -392,10 +416,30 @@ class ApiService {
   }
 
   /// Fetch pairing QR code for Real WhatsApp Web
-  Future<Map<String, dynamic>?> getRealWhatsAppQr() async {
+  Future<Map<String, dynamic>?> getRealWhatsAppQr({bool forceFresh = false}) async {
     final client = _createClient();
     try {
-      final request = await client.getUrl(Uri.parse('$baseUrl/api/whatsapp/real/qr'));
+      final query = forceFresh ? '?fresh=1' : '';
+      final request = await client.getUrl(Uri.parse('$baseUrl/api/whatsapp/real/qr$query'));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final body = await response.transform(utf8.decoder).join();
+        return jsonDecode(body) as Map<String, dynamic>;
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+    return null;
+  }
+
+  /// Trigger or force-refresh a Real WhatsApp Web QR pairing session
+  Future<Map<String, dynamic>?> startRealWhatsApp({bool forceReset = false}) async {
+    final client = _createClient();
+    try {
+      final request = await client.postUrl(Uri.parse('$baseUrl/api/whatsapp/real/start'));
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode({'forceReset': forceReset}));
       final response = await request.close();
       if (response.statusCode == 200) {
         final body = await response.transform(utf8.decoder).join();

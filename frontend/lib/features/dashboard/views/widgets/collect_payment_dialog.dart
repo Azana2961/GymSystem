@@ -35,7 +35,11 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
     _selectedMethod = _settings.paymentMethods.first;
 
     if (widget.initialMember != null) {
-      _selectedMember = widget.initialMember;
+      final latest = MembersProvider.instance.allMembers
+              .where((m) => m.id == widget.initialMember!.id)
+              .firstOrNull ??
+          widget.initialMember;
+      _selectedMember = latest;
       _selectedPlan = _matchPlanName(_selectedMember?.plan);
       _configureForMember(_selectedMember);
     } else {
@@ -60,10 +64,20 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
     return rawPlan;
   }
 
+  bool get _isSelectedMemberAlreadyPaid =>
+      _selectedMember != null &&
+      !_selectedMember!.isVisitor &&
+      !_selectedMember!.isExpired &&
+      !_selectedMember!.isPaymentPending &&
+      _selectedMember!.dueAmount <= 0;
+
   void _configureForMember(MemberModel? m) {
     if (m == null) return;
-    // If member has existing Udhaar and their plan isn't expired yet, default to collecting their Udhaar first
-    if (m.dueAmount > 0 && !m.isExpired) {
+    if (!m.isVisitor && !m.isExpired && !m.isPaymentPending && m.dueAmount <= 0) {
+      _includePlanRenewal = false;
+      _includeExtraFee = false;
+    } else if (m.dueAmount > 0 && !m.isExpired) {
+      // If member has existing Udhaar and their plan isn't expired yet, default to collecting their Udhaar first
       _includePlanRenewal = false;
       _includeExtraFee = false;
     } else {
@@ -301,7 +315,7 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                       separatorBuilder: (context, index) => const Divider(height: 1, color: AppColors.border),
                       itemBuilder: (context, index) {
                         final m = _filteredMembers[index];
-                        final isDue = m.isPaymentPending || m.expiryDate.isBefore(DateTime.now());
+                        final isDue = m.isPaymentPending || m.dueAmount > 0 || m.expiryDate.isBefore(DateTime.now());
                         return InkWell(
                           onTap: () => _onSelectMember(m),
                           hoverColor: AppColors.surfaceLight,
@@ -359,6 +373,16 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                                       border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
                                     ),
                                     child: const Text('Due', style: TextStyle(color: AppColors.warning, fontSize: 11, fontWeight: FontWeight.bold)),
+                                  )
+                                else if (!m.isVisitor)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.success.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: AppColors.success.withValues(alpha: 0.4)),
+                                    ),
+                                    child: const Text('Paid ✓', style: TextStyle(color: AppColors.success, fontSize: 11, fontWeight: FontWeight.bold)),
                                   ),
                               ],
                             ),
@@ -371,13 +395,17 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
 
                 // Selected Member Card OR Empty State
                 const SizedBox(height: 14),
-                if (_selectedMember != null)
+                if (_selectedMember != null) ...[
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
                       color: AppColors.background,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
+                      border: Border.all(
+                        color: _isSelectedMemberAlreadyPaid
+                            ? AppColors.success.withValues(alpha: 0.5)
+                            : AppColors.primary.withValues(alpha: 0.4),
+                      ),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -387,7 +415,7 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                             children: [
                               CircleAvatar(
                                 radius: 18,
-                                backgroundColor: AppColors.primary,
+                                backgroundColor: _isSelectedMemberAlreadyPaid ? AppColors.success : AppColors.primary,
                                 child: Text(
                                   _selectedMember!.name.isNotEmpty ? _selectedMember!.name[0] : 'M',
                                   style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 15),
@@ -428,7 +456,7 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                         ),
                         Row(
                           children: [
-                            if (_selectedMember!.isPaymentPending || _selectedMember!.isExpired)
+                            if (_selectedMember!.isPaymentPending || _selectedMember!.dueAmount > 0 || _selectedMember!.isExpired)
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
@@ -444,7 +472,7 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                                   color: AppColors.success.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                                child: const Text('Active', style: TextStyle(color: AppColors.success, fontSize: 11, fontWeight: FontWeight.bold)),
+                                child: const Text('Paid This Month', style: TextStyle(color: AppColors.success, fontSize: 11, fontWeight: FontWeight.bold)),
                               ),
                             const SizedBox(width: 8),
                             IconButton(
@@ -464,7 +492,32 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                         ),
                       ],
                     ),
-                  )
+                  ),
+                  if (_isSelectedMemberAlreadyPaid) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.success.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.success.withValues(alpha: 0.45)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.verified_rounded, color: AppColors.success, size: 18),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'This month\'s fee is already paid (Valid until ${_selectedMember!.expiryDate.toString().split(' ').first}).',
+                              style: const TextStyle(color: AppColors.success, fontSize: 12.5, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ]
                 else
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -930,12 +983,23 @@ class _CollectPaymentDialogState extends State<CollectPaymentDialog> {
                     ),
                     const SizedBox(width: 12),
                     ElevatedButton.icon(
-                      onPressed: _selectedMember == null ? null : _submitPayment,
-                      icon: const Icon(Icons.check_circle_outline, color: Colors.black, size: 18),
-                      label: const Text('Confirm Payment', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                      onPressed: (_selectedMember == null || _isSelectedMemberAlreadyPaid) ? null : _submitPayment,
+                      icon: Icon(
+                        _isSelectedMemberAlreadyPaid ? Icons.check_circle_rounded : Icons.check_circle_outline,
+                        color: (_selectedMember == null || _isSelectedMemberAlreadyPaid) ? AppColors.textMuted : Colors.black,
+                        size: 18,
+                      ),
+                      label: Text(
+                        _isSelectedMemberAlreadyPaid ? 'Fee Paid (This Month)' : 'Confirm Payment',
+                        style: TextStyle(
+                          color: (_selectedMember == null || _isSelectedMemberAlreadyPaid) ? AppColors.textMuted : Colors.black,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
-                        disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.3),
+                        disabledBackgroundColor: Colors.white.withValues(alpha: 0.1),
+                        disabledForegroundColor: AppColors.textMuted,
                         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),

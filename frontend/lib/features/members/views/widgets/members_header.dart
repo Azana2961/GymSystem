@@ -129,7 +129,7 @@ class _MembersHeaderState extends State<MembersHeader> {
             const SizedBox(width: 10),
             IconButton(
               icon: const Icon(Icons.refresh_rounded, color: AppColors.primary),
-              tooltip: 'Sync with SQLite Database',
+              tooltip: 'Refresh Members List',
               onPressed: () => widget.provider.refresh(),
             ),
             const SizedBox(width: 10),

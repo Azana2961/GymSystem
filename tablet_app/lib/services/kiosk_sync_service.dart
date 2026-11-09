@@ -99,10 +99,15 @@ class KioskSyncService extends ChangeNotifier {
       _isOnline = true;
       notifyListeners();
 
-      // Sync latest members
-      await syncMembersRoster();
-      // Flush any queued offline scans (including verification photos)
-      await flushOfflineScans();
+      // Immediately send heartbeat to PC so PC dashboard turns yellow immediately!
+      unawaited(_sendHeartbeat());
+
+      // Sync latest members in background
+      unawaited(syncMembersRoster());
+      // Flush any queued offline scans (including verification photos) in background
+      if (_storage.pendingScansCount > 0) {
+        unawaited(flushOfflineScans());
+      }
       // Open WebSocket Channel for instant live member updates
       _openWebSocket();
     } else {
@@ -131,8 +136,6 @@ class KioskSyncService extends ChangeNotifier {
       final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
       _wsChannel = channel;
       channel.ready.catchError((_) {
-        _isOnline = false;
-        notifyListeners();
         _scheduleReconnect();
       });
 
@@ -141,13 +144,9 @@ class KioskSyncService extends ChangeNotifier {
           _handleWsMessage(data.toString());
         },
         onDone: () {
-          _isOnline = false;
-          notifyListeners();
           _scheduleReconnect();
         },
         onError: (_) {
-          _isOnline = false;
-          notifyListeners();
           _scheduleReconnect();
         },
       );
@@ -424,6 +423,10 @@ class KioskSyncService extends ChangeNotifier {
           )
           .timeout(const Duration(seconds: 3));
       if (res.statusCode == 200) {
+        if (!_isOnline) {
+          _isOnline = true;
+          notifyListeners();
+        }
         if (_storage.pendingScansCount > 0) {
           await flushOfflineScans();
         }
@@ -433,6 +436,16 @@ class KioskSyncService extends ChangeNotifier {
         _scheduleReconnect();
       }
     } catch (_) {
+      try {
+        final ping = await http.get(Uri.parse('$serverUrl/api/ping')).timeout(const Duration(seconds: 1));
+        if (ping.statusCode == 200) {
+          if (!_isOnline) {
+            _isOnline = true;
+            notifyListeners();
+          }
+          return;
+        }
+      } catch (_) {}
       _isOnline = false;
       notifyListeners();
       _scheduleReconnect();

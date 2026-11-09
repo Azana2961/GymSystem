@@ -1,3 +1,7 @@
+import 'package:gym_system/core/constants/app_settings.dart';
+import 'package:gym_system/features/members/models/member_model.dart';
+import 'package:gym_system/features/members/providers/members_provider.dart';
+
 class MonthlyAnalyticsReport {
   final String monthKey;
   final String monthLabel;
@@ -16,7 +20,7 @@ class MonthlyAnalyticsReport {
   final Map<String, double> paymentMethods; // Method -> Percentage (0 - 100)
   final Map<String, int> planMembers; // Plan name -> count
   final List<DefaulterRecord> defaulters;
-  final List<String> historyMonths;
+  final List<String> historyMonths; // Dynamic weeks of current month: Week 1, Week 2, ...
   final List<double> historyBaseRevenue;
   final List<double> historyPtRevenue;
   final List<double> historySignups;
@@ -67,302 +71,242 @@ class DefaulterRecord {
 }
 
 class AnalyticsRepository {
-  static const List<String> availableMonths = [
-    'October 2026',
-    'September 2026',
-    'August 2026',
-    'July 2026',
-    'June 2026',
-    'May 2026',
-    'Year-To-Date (2026)',
+  static const List<String> _fullMonthNames = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
 
-  static MonthlyAnalyticsReport getReport(String month) {
-    switch (month) {
-      case 'September 2026':
-        return const MonthlyAnalyticsReport(
-          monthKey: 'sep_2026',
-          monthLabel: 'September 2026',
-          totalRevenue: 430000,
-          baseMembershipRevenue: 340000,
-          joiningAndPtRevenue: 90000,
-          revenueTrend: '+8.9%',
-          isRevenueUp: true,
-          activeMembers: 230,
-          newSignups: 28,
-          expiredCount: 14,
-          pendingDues: 45000,
-          overdueCount: 8,
-          dailyFootfall: 248,
-          totalCheckins: 7440,
-          paymentMethods: {
-            'Cash': 58,
-            'Credit/Debit Card': 20,
-            'Bank Transfer': 12,
-            'JazzCash/Easypaisa': 10,
-          },
-          planMembers: {
-            'Basic Plan': 88,
-            'Silver Plan': 66,
-            'Gold Plan': 48,
-            'Platinum Plan': 28,
-          },
-          defaulters: [
-            DefaulterRecord(id: 'M002', name: 'Ayesha Khan', plan: 'Silver Plan', phone: '+92 321 4589211', amountDue: 18000, daysOverdue: 22),
-            DefaulterRecord(id: 'M005', name: 'Usman Khalid', plan: 'Basic Plan', phone: '+92 301 7748123', amountDue: 8000, daysOverdue: 19),
-            DefaulterRecord(id: 'M007', name: 'Bilal Ahmed', plan: 'Basic Plan', phone: '+92 333 4819201', amountDue: 8000, daysOverdue: 14),
-            DefaulterRecord(id: 'M009', name: 'Hamza Tariq', plan: 'Gold Plan', phone: '+92 345 5612890', amountDue: 11000, daysOverdue: 8),
-          ],
-          historyMonths: ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'],
-          historyBaseRevenue: [240000, 260000, 280000, 300000, 320000, 340000],
-          historyPtRevenue: [50000, 55000, 60000, 65000, 75000, 90000],
-          historySignups: [20, 23, 26, 25, 29, 28],
-          historyExpirations: [12, 14, 15, 11, 16, 14],
-        );
+  /// Only the current active month (no historical multi-month comparisons)
+  static List<String> get availableMonths {
+    final now = DateTime.now();
+    return ['${_fullMonthNames[now.month - 1]} ${now.year}'];
+  }
 
-      case 'August 2026':
-        return const MonthlyAnalyticsReport(
-          monthKey: 'aug_2026',
-          monthLabel: 'August 2026',
-          totalRevenue: 395000,
-          baseMembershipRevenue: 320000,
-          joiningAndPtRevenue: 75000,
-          revenueTrend: '+7.4%',
-          isRevenueUp: true,
-          activeMembers: 216,
-          newSignups: 29,
-          expiredCount: 16,
-          pendingDues: 52000,
-          overdueCount: 9,
-          dailyFootfall: 236,
-          totalCheckins: 7080,
-          paymentMethods: {
-            'Cash': 60,
-            'Credit/Debit Card': 20,
-            'Bank Transfer': 10,
-            'JazzCash/Easypaisa': 10,
-          },
-          planMembers: {
-            'Basic Plan': 82,
-            'Silver Plan': 62,
-            'Gold Plan': 46,
-            'Platinum Plan': 26,
-          },
-          defaulters: [
-            DefaulterRecord(id: 'M005', name: 'Usman Khalid', plan: 'Basic Plan', phone: '+92 301 7748123', amountDue: 8000, daysOverdue: 35),
-            DefaulterRecord(id: 'M007', name: 'Bilal Ahmed', plan: 'Basic Plan', phone: '+92 333 4819201', amountDue: 8000, daysOverdue: 28),
-            DefaulterRecord(id: 'M011', name: 'Zeeshan Malik', plan: 'Silver Plan', phone: '+92 300 9812456', amountDue: 18000, daysOverdue: 15),
-            DefaulterRecord(id: 'M013', name: 'Talha Sheikh', plan: 'Gold Plan', phone: '+92 322 7712390', amountDue: 18000, daysOverdue: 11),
-          ],
-          historyMonths: ['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug'],
-          historyBaseRevenue: [220000, 240000, 260000, 280000, 300000, 320000],
-          historyPtRevenue: [45000, 50000, 55000, 60000, 65000, 75000],
-          historySignups: [18, 20, 23, 26, 25, 29],
-          historyExpirations: [10, 12, 14, 15, 11, 16],
-        );
-
-      case 'July 2026':
-        return const MonthlyAnalyticsReport(
-          monthKey: 'jul_2026',
-          monthLabel: 'July 2026',
-          totalRevenue: 365000,
-          baseMembershipRevenue: 300000,
-          joiningAndPtRevenue: 65000,
-          revenueTrend: '+6.1%',
-          isRevenueUp: true,
-          activeMembers: 203,
-          newSignups: 25,
-          expiredCount: 11,
-          pendingDues: 41000,
-          overdueCount: 7,
-          dailyFootfall: 225,
-          totalCheckins: 6750,
-          paymentMethods: {
-            'Cash': 62,
-            'Credit/Debit Card': 18,
-            'Bank Transfer': 10,
-            'JazzCash/Easypaisa': 10,
-          },
-          planMembers: {
-            'Basic Plan': 78,
-            'Silver Plan': 58,
-            'Gold Plan': 44,
-            'Platinum Plan': 23,
-          },
-          defaulters: [
-            DefaulterRecord(id: 'M007', name: 'Bilal Ahmed', plan: 'Basic Plan', phone: '+92 333 4819201', amountDue: 8000, daysOverdue: 18),
-            DefaulterRecord(id: 'M011', name: 'Zeeshan Malik', plan: 'Silver Plan', phone: '+92 300 9812456', amountDue: 18000, daysOverdue: 12),
-            DefaulterRecord(id: 'M014', name: 'Fahad Mustafa', plan: 'Basic Plan', phone: '+92 344 6612984', amountDue: 15000, daysOverdue: 9),
-          ],
-          historyMonths: ['Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'],
-          historyBaseRevenue: [205000, 220000, 240000, 260000, 280000, 300000],
-          historyPtRevenue: [40000, 45000, 50000, 55000, 60000, 65000],
-          historySignups: [16, 18, 20, 23, 26, 25],
-          historyExpirations: [9, 10, 12, 14, 15, 11],
-        );
-
-      case 'June 2026':
-        return const MonthlyAnalyticsReport(
-          monthKey: 'jun_2026',
-          monthLabel: 'June 2026',
-          totalRevenue: 340000,
-          baseMembershipRevenue: 280000,
-          joiningAndPtRevenue: 60000,
-          revenueTrend: '+7.7%',
-          isRevenueUp: true,
-          activeMembers: 195,
-          newSignups: 26,
-          expiredCount: 15,
-          pendingDues: 48000,
-          overdueCount: 8,
-          dailyFootfall: 212,
-          totalCheckins: 6360,
-          paymentMethods: {
-            'Cash': 64,
-            'Credit/Debit Card': 16,
-            'Bank Transfer': 10,
-            'JazzCash/Easypaisa': 10,
-          },
-          planMembers: {
-            'Basic Plan': 75,
-            'Silver Plan': 55,
-            'Gold Plan': 42,
-            'Platinum Plan': 23,
-          },
-          defaulters: [
-            DefaulterRecord(id: 'M011', name: 'Zeeshan Malik', plan: 'Silver Plan', phone: '+92 300 9812456', amountDue: 18000, daysOverdue: 22),
-            DefaulterRecord(id: 'M014', name: 'Fahad Mustafa', plan: 'Basic Plan', phone: '+92 344 6612984', amountDue: 15000, daysOverdue: 17),
-            DefaulterRecord(id: 'M016', name: 'Haris Rauf', plan: 'Basic Plan', phone: '+92 312 8841920', amountDue: 15000, daysOverdue: 12),
-          ],
-          historyMonths: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-          historyBaseRevenue: [190000, 205000, 220000, 240000, 260000, 280000],
-          historyPtRevenue: [35000, 40000, 45000, 50000, 55000, 60000],
-          historySignups: [15, 16, 18, 20, 23, 26],
-          historyExpirations: [8, 9, 10, 12, 14, 15],
-        );
-
-      case 'May 2026':
-        return const MonthlyAnalyticsReport(
-          monthKey: 'may_2026',
-          monthLabel: 'May 2026',
-          totalRevenue: 315000,
-          baseMembershipRevenue: 260000,
-          joiningAndPtRevenue: 55000,
-          revenueTrend: '+8.3%',
-          isRevenueUp: true,
-          activeMembers: 184,
-          newSignups: 23,
-          expiredCount: 14,
-          pendingDues: 44000,
-          overdueCount: 7,
-          dailyFootfall: 201,
-          totalCheckins: 6030,
-          paymentMethods: {
-            'Cash': 65,
-            'Credit/Debit Card': 15,
-            'Bank Transfer': 10,
-            'JazzCash/Easypaisa': 10,
-          },
-          planMembers: {
-            'Basic Plan': 72,
-            'Silver Plan': 52,
-            'Gold Plan': 39,
-            'Platinum Plan': 21,
-          },
-          defaulters: [
-            DefaulterRecord(id: 'M014', name: 'Fahad Mustafa', plan: 'Basic Plan', phone: '+92 344 6612984', amountDue: 15000, daysOverdue: 25),
-            DefaulterRecord(id: 'M016', name: 'Haris Rauf', plan: 'Basic Plan', phone: '+92 312 8841920', amountDue: 15000, daysOverdue: 19),
-            DefaulterRecord(id: 'M018', name: 'Saad Farooq', plan: 'Silver Plan', phone: '+92 333 1129847', amountDue: 14000, daysOverdue: 14),
-          ],
-          historyMonths: ['Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May'],
-          historyBaseRevenue: [175000, 190000, 205000, 220000, 240000, 260000],
-          historyPtRevenue: [30000, 35000, 40000, 45000, 50000, 55000],
-          historySignups: [14, 15, 16, 18, 20, 23],
-          historyExpirations: [7, 8, 9, 10, 12, 14],
-        );
-
-      case 'Year-To-Date (2026)':
-        return const MonthlyAnalyticsReport(
-          monthKey: 'ytd_2026',
-          monthLabel: 'Year-To-Date (2026)',
-          totalRevenue: 2323000,
-          baseMembershipRevenue: 1840000,
-          joiningAndPtRevenue: 483000,
-          revenueTrend: '+24.5%',
-          isRevenueUp: true,
-          activeMembers: 248,
-          newSignups: 159,
-          expiredCount: 86,
-          pendingDues: 38000,
-          overdueCount: 6,
-          dailyFootfall: 231,
-          totalCheckins: 41580,
-          paymentMethods: {
-            'Cash': 57,
-            'Credit/Debit Card': 21,
-            'Bank Transfer': 12,
-            'JazzCash/Easypaisa': 10,
-          },
-          planMembers: {
-            'Basic Plan': 95,
-            'Silver Plan': 72,
-            'Gold Plan': 53,
-            'Platinum Plan': 28,
-          },
-          defaulters: [
-            DefaulterRecord(id: 'M002', name: 'Ayesha Khan', plan: 'Silver Plan', phone: '+92 321 4589211', amountDue: 18000, daysOverdue: 5),
-            DefaulterRecord(id: 'M005', name: 'Usman Khalid', plan: 'Basic Plan', phone: '+92 301 7748123', amountDue: 8000, daysOverdue: 2),
-            DefaulterRecord(id: 'M007', name: 'Bilal Ahmed', plan: 'Basic Plan', phone: '+92 333 4819201', amountDue: 5000, daysOverdue: 7),
-            DefaulterRecord(id: 'M009', name: 'Hamza Tariq', plan: 'Gold Plan', phone: '+92 345 5612890', amountDue: 7000, daysOverdue: 4),
-          ],
-          historyMonths: ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'],
-          historyBaseRevenue: [260000, 280000, 300000, 320000, 340000, 385000],
-          historyPtRevenue: [55000, 60000, 65000, 75000, 90000, 100000],
-          historySignups: [23, 26, 25, 29, 28, 34],
-          historyExpirations: [14, 15, 11, 16, 14, 16],
-        );
-
-      case 'October 2026':
-      default:
-        return const MonthlyAnalyticsReport(
-          monthKey: 'oct_2026',
-          monthLabel: 'October 2026',
-          totalRevenue: 485000,
-          baseMembershipRevenue: 385000,
-          joiningAndPtRevenue: 100000,
-          revenueTrend: '+12.8%',
-          isRevenueUp: true,
-          activeMembers: 248,
-          newSignups: 34,
-          expiredCount: 16,
-          pendingDues: 38000,
-          overdueCount: 6,
-          dailyFootfall: 264,
-          totalCheckins: 7920,
-          paymentMethods: {
-            'Cash': 56,
-            'Credit/Debit Card': 22,
-            'Bank Transfer': 12,
-            'JazzCash/Easypaisa': 10,
-          },
-          planMembers: {
-            'Basic Plan': 95,
-            'Silver Plan': 72,
-            'Gold Plan': 53,
-            'Platinum Plan': 28,
-          },
-          defaulters: [
-            DefaulterRecord(id: 'M002', name: 'Ayesha Khan', plan: 'Silver Plan', phone: '+92 321 4589211', amountDue: 18000, daysOverdue: 5),
-            DefaulterRecord(id: 'M005', name: 'Usman Khalid', plan: 'Basic Plan', phone: '+92 301 7748123', amountDue: 8000, daysOverdue: 2),
-            DefaulterRecord(id: 'M007', name: 'Bilal Ahmed', plan: 'Basic Plan', phone: '+92 333 4819201', amountDue: 5000, daysOverdue: 7),
-            DefaulterRecord(id: 'M009', name: 'Hamza Tariq', plan: 'Gold Plan', phone: '+92 345 5612890', amountDue: 7000, daysOverdue: 4),
-          ],
-          historyMonths: ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'],
-          historyBaseRevenue: [260000, 280000, 300000, 320000, 340000, 385000],
-          historyPtRevenue: [55000, 60000, 65000, 75000, 90000, 100000],
-          historySignups: [23, 26, 25, 29, 28, 34],
-          historyExpirations: [14, 15, 11, 16, 14, 16],
-        );
+  static (double, double) _splitMemberRevenue(MemberModel m) {
+    if (m.paidAmount <= 0 || m.isVisitor) return (0.0, 0.0);
+    final settings = AppSettings.instance;
+    final planPrice = settings.getPlanPrice(m.plan);
+    if (settings.enableJoiningFee && settings.joiningFeeAmount > 0 && m.paidAmount > planPrice && planPrice > 0) {
+      final joining = (m.paidAmount - planPrice).clamp(0.0, settings.joiningFeeAmount);
+      final base = (m.paidAmount - joining).clamp(0.0, m.paidAmount);
+      return (base, joining);
     }
+    return (m.paidAmount, 0.0);
+  }
+
+  static MonthlyAnalyticsReport getReport(
+    String monthLabel, {
+    List<MemberModel>? liveMembers,
+    List<Map<String, dynamic>>? attendanceFeed,
+    int? todayCheckins,
+  }) {
+    final now = DateTime.now();
+    final allMembers = liveMembers ?? MembersProvider.instance.allMembers;
+    final feed = attendanceFeed ?? const [];
+    final targetYear = now.year;
+    final targetMonth = now.month;
+    final currentMonthTitle = '${_fullMonthNames[targetMonth - 1]} $targetYear';
+
+    // Members registered/active in the current month
+    final List<MemberModel> periodMembers = allMembers.where((m) {
+      final dt = (m.startDate ?? now).toLocal();
+      return dt.year == targetYear && dt.month == targetMonth;
+    }).toList();
+
+    // Revenue calculation for this month from live SQLite records
+    double totalRev = 0.0;
+    double baseRev = 0.0;
+    double joiningRev = 0.0;
+
+    for (final m in periodMembers) {
+      if (m.paidAmount <= 0 || m.isVisitor) continue;
+      final (b, j) = _splitMemberRevenue(m);
+      totalRev += m.paidAmount;
+      baseRev += b;
+      joiningRev += j;
+    }
+
+    // Active, expired & due counts (100% consistent with Dashboard and Members screen)
+    int activeCount = 0;
+    int expiredCount = 0;
+    double pendingDues = 0.0;
+    final List<DefaulterRecord> defaulters = [];
+
+    for (final m in allMembers) {
+      final isExp = m.expiryDate.isBefore(now);
+      final hasDue = !m.isVisitor && (m.dueAmount > 0 || m.isPaymentPending);
+      if (!m.isVisitor && isExp) {
+        expiredCount++;
+      } else if (!isExp && !hasDue && m.isActive) {
+        activeCount++;
+      }
+      if (hasDue) {
+        final dueAmt = m.dueAmount > 0
+            ? m.dueAmount
+            : AppSettings.instance.getPlanPrice(m.plan);
+        pendingDues += dueAmt;
+        final overdueDays = isExp ? now.difference(m.expiryDate).inDays.clamp(1, 365) : 0;
+        defaulters.add(
+          DefaulterRecord(
+            id: m.id,
+            name: m.name,
+            plan: m.plan,
+            phone: m.phone ?? 'N/A',
+            amountDue: dueAmt,
+            daysOverdue: overdueDays,
+          ),
+        );
+      }
+    }
+    defaulters.sort((a, b) => b.amountDue.compareTo(a.amountDue));
+
+    // Check-ins for this month (includes regular members + visitor scans + visitor registrations)
+    int periodCheckins = 0;
+    final Set<String> activeCheckinDays = {};
+    final Set<String> scannedVisitorIds = {};
+
+    for (final item in feed) {
+      final rawTs = item['scanned_at'] ?? item['scan_time'] ?? item['timestamp'] ?? item['created_at'] ?? '';
+      final dt = DateTime.tryParse(rawTs.toString().replaceFirst(' ', 'T'))?.toLocal();
+      if (dt == null) continue;
+      if (dt.year == targetYear && dt.month == targetMonth) {
+        periodCheckins++;
+        activeCheckinDays.add('${dt.year}-${dt.month}-${dt.day}');
+        final mId = item['member_id']?.toString();
+        if (mId != null && mId.isNotEmpty) {
+          scannedVisitorIds.add(mId);
+        }
+      }
+    }
+
+    // Also count Visitor Pass registrations in this month if not already scanned at the kiosk
+    for (final m in periodMembers) {
+      if (m.isVisitor && !scannedVisitorIds.contains(m.id)) {
+        final dt = (m.startDate ?? now).toLocal();
+        periodCheckins++;
+        activeCheckinDays.add('${dt.year}-${dt.month}-${dt.day}');
+      }
+    }
+
+    if (todayCheckins != null && todayCheckins > periodCheckins) {
+      periodCheckins = todayCheckins;
+    }
+
+    final int dailyFootfall = periodCheckins == 0
+        ? 0
+        : (activeCheckinDays.isNotEmpty
+            ? (periodCheckins / activeCheckinDays.length).round()
+            : periodCheckins);
+
+    // Payment method share (%) from real member payment notes
+    final configuredMethods = AppSettings.instance.paymentMethods.isNotEmpty
+        ? AppSettings.instance.paymentMethods
+        : ['Cash', 'Bank Transfer', 'JazzCash', 'Easypaisa'];
+    final Map<String, double> methodTotals = {
+      for (final method in configuredMethods) method: 0.0,
+    };
+
+    for (final m in periodMembers) {
+      if (m.paidAmount <= 0 || m.isVisitor) continue;
+      final notesLower = (m.notes ?? '').toLowerCase();
+      String? matchedMethod;
+      for (final method in configuredMethods) {
+        if (notesLower.contains(method.toLowerCase())) {
+          matchedMethod = method;
+          break;
+        }
+      }
+      matchedMethod ??= configuredMethods.first;
+      methodTotals[matchedMethod] = (methodTotals[matchedMethod] ?? 0.0) + m.paidAmount;
+    }
+
+    final Map<String, double> paymentMethodPct = {};
+    for (final entry in methodTotals.entries) {
+      paymentMethodPct[entry.key] = totalRev > 0 ? ((entry.value / totalRev) * 100.0) : 0.0;
+    }
+
+    // Plan distribution from real members
+    final Map<String, int> planMembers = {
+      for (final p in AppSettings.instance.plans) p.name: 0,
+    };
+    for (final m in allMembers) {
+      if (m.isVisitor) continue;
+      planMembers[m.plan] = (planMembers[m.plan] ?? 0) + 1;
+    }
+
+    // Dynamic Weekly Breakdown for ONLY This Month (Week 1 .. Week 4/5)
+    final int daysInMonth = DateTime(targetYear, targetMonth + 1, 0).day;
+    final int weekBuckets = daysInMonth > 28 ? 5 : 4;
+    final List<String> historyWeeks = [];
+    final List<double> historyBase = List.filled(weekBuckets, 0.0);
+    final List<double> historyPt = List.filled(weekBuckets, 0.0);
+    final List<double> historySignups = List.filled(weekBuckets, 0.0);
+    final List<double> historyExpirations = List.filled(weekBuckets, 0.0);
+
+    for (int w = 0; w < weekBuckets; w++) {
+      final startDay = (w * 7) + 1;
+      final endDay = ((w + 1) * 7).clamp(startDay, daysInMonth);
+      historyWeeks.add('Week ${w + 1} ($startDay–$endDay)');
+    }
+
+    for (final m in periodMembers) {
+      final dt = (m.startDate ?? now).toLocal();
+      final int wIdx = ((dt.day - 1) ~/ 7).clamp(0, weekBuckets - 1);
+      if (!m.isVisitor) {
+        historySignups[wIdx] += 1;
+      }
+      if (m.paidAmount > 0 && !m.isVisitor) {
+        final (b, j) = _splitMemberRevenue(m);
+        historyBase[wIdx] += b;
+        historyPt[wIdx] += j;
+      }
+    }
+
+    for (final m in allMembers) {
+      if (m.isVisitor) continue;
+      final exp = m.expiryDate.toLocal();
+      if (exp.year == targetYear && exp.month == targetMonth && exp.isBefore(now)) {
+        final int wIdx = ((exp.day - 1) ~/ 7).clamp(0, weekBuckets - 1);
+        historyExpirations[wIdx] += 1;
+      }
+    }
+
+    final int paidAccountsCount = periodMembers.where((m) => !m.isVisitor && m.paidAmount > 0).length;
+    final String trendStr = paidAccountsCount > 0 ? '$paidAccountsCount Paid' : '0 Paid';
+
+    return MonthlyAnalyticsReport(
+      monthKey: currentMonthTitle.toLowerCase().replaceAll(' ', '_'),
+      monthLabel: currentMonthTitle,
+      totalRevenue: totalRev,
+      baseMembershipRevenue: baseRev,
+      joiningAndPtRevenue: joiningRev,
+      revenueTrend: trendStr,
+      isRevenueUp: totalRev >= 0,
+      activeMembers: activeCount,
+      newSignups: periodMembers.where((m) => !m.isVisitor).length,
+      expiredCount: expiredCount,
+      pendingDues: pendingDues,
+      overdueCount: defaulters.length,
+      dailyFootfall: dailyFootfall,
+      totalCheckins: periodCheckins,
+      paymentMethods: paymentMethodPct,
+      planMembers: planMembers,
+      defaulters: defaulters,
+      historyMonths: historyWeeks,
+      historyBaseRevenue: historyBase,
+      historyPtRevenue: historyPt,
+      historySignups: historySignups,
+      historyExpirations: historyExpirations,
+    );
   }
 }

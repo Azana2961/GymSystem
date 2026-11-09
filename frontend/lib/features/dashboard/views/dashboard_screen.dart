@@ -31,7 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     _membersProvider.addListener(_onMembersUpdated);
     _fetchStats();
-    _statsPoller = Timer.periodic(const Duration(seconds: 2), (_) => _fetchStats());
+    _statsPoller = Timer.periodic(const Duration(seconds: 1), (_) => _fetchStats());
   }
 
   void _onMembersUpdated() {
@@ -198,15 +198,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final checkinDiff = todayCheckinsInt - yesterdayCheckinsInt;
     final checkinTrend = checkinDiff >= 0 ? '+$checkinDiff vs yesterday' : '$checkinDiff vs yesterday';
 
-    final activeInt = (_liveStats?['activeMembers'] as num?)?.toInt() ?? _membersProvider.activeMembersCount;
-    final dueInt = (_liveStats?['dueMembers'] as num?)?.toInt() ?? _membersProvider.pendingPaymentCount;
-    final expiredInt = (_liveStats?['expiredMembers'] as num?)?.toInt() ?? _membersProvider.expiredMembersCount;
-    final totalInt = (_liveStats?['totalMembers'] as num?)?.toInt() ?? _membersProvider.totalMembersCount;
-    final visitorInt = (_liveStats?['visitorMembers'] as num?)?.toInt() ??
-        _membersProvider.allMembers.where((m) => m.isVisitor).length;
+    final hasLocal = !_membersProvider.isLoading || _membersProvider.allMembers.isNotEmpty;
+    final activeInt = hasLocal
+        ? _membersProvider.activeMembersCount
+        : ((_liveStats?['activeMembers'] as num?)?.toInt() ?? _membersProvider.activeMembersCount);
+    final dueInt = hasLocal
+        ? _membersProvider.allMembers.where((m) => !m.isVisitor && (m.isPaymentPending || m.dueAmount > 0)).length
+        : ((_liveStats?['dueMembers'] as num?)?.toInt() ?? _membersProvider.pendingPaymentCount);
+    final expiredInt = hasLocal
+        ? _membersProvider.expiredMembersCount
+        : ((_liveStats?['expiredMembers'] as num?)?.toInt() ?? _membersProvider.expiredMembersCount);
+    final totalInt = hasLocal
+        ? _membersProvider.totalMembersCount
+        : ((_liveStats?['totalMembers'] as num?)?.toInt() ?? _membersProvider.totalMembersCount);
+    final visitorInt = hasLocal
+        ? _membersProvider.allMembers.where((m) => m.isVisitor).length
+        : ((_liveStats?['visitorMembers'] as num?)?.toInt() ?? 0);
     final regularInt = (totalInt - visitorInt).clamp(0, totalInt);
     final totalDueRs = (_liveStats?['totalDueAmount'] as num?)?.toDouble() ?? _membersProvider.totalDueAmount;
-    final activeRate = totalInt > 0 ? ((activeInt / totalInt) * 100).round() : 100;
+    final activeRate = totalInt > 0 ? ((activeInt / totalInt) * 100).round() : 0;
 
     final checkins = todayCheckinsInt.toString();
     final active = activeInt.toString();
@@ -228,7 +238,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final isCompact = constraints.maxWidth < 920;
+                final isCompact = constraints.maxWidth < 1080;
 
                 final titleWidget = Row(
                   children: [
@@ -263,7 +273,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           const SizedBox(height: 2),
                           const Text(
-                            'SQLite Connected • Live Tablet Feed & WhatsApp Engine Active',
+                            'Daily Gym Operations, Live Attendance & Membership Overview',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -291,14 +301,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         style: TextStyle(
                           color: Colors.black,
                           fontWeight: FontWeight.bold,
-                          fontSize: 13.5,
+                          fontSize: 13,
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.black,
                         elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
@@ -312,13 +322,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         style: TextStyle(
                           color: AppColors.primary,
                           fontWeight: FontWeight.bold,
-                          fontSize: 13.5,
+                          fontSize: 13,
                         ),
                       ),
                       style: OutlinedButton.styleFrom(
                         backgroundColor: AppColors.surfaceLight,
                         side: const BorderSide(color: AppColors.primary, width: 1.5),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
@@ -339,7 +349,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             style: TextStyle(
                               color: _hasConnectedTablet ? AppColors.primary : const Color(0xFFFF1744),
                               fontWeight: FontWeight.bold,
-                              fontSize: 13.5,
+                              fontSize: 13,
                             ),
                           ),
                           const SizedBox(width: 7),
@@ -368,7 +378,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           color: _hasConnectedTablet ? AppColors.primary : const Color(0xFFFF1744),
                           width: 1.5,
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
@@ -392,8 +402,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Expanded(child: titleWidget),
-                    const SizedBox(width: 16),
-                    actionButtons,
+                    const SizedBox(width: 14),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: actionButtons,
+                      ),
+                    ),
                   ],
                 );
               },
@@ -440,7 +455,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ? 'Rs. ${AppSettings.formatAmount(totalDueRs)} Udhaar'
                         : (dueInt + expiredInt > 0 ? '${dueInt + expiredInt} Actionable' : 'Rs. 0 Udhaar'),
                     isTrendUp: dueInt == 0 && expiredInt == 0 && totalDueRs == 0,
-                    trendDescription: '$dueInt Udhaar • $expiredInt expired',
+                    trendDescription: (dueInt > 0 || expiredInt > 0)
+                        ? '$dueInt Udhaar • $expiredInt expired'
+                        : 'No overdue accounts',
                   ),
                   KpiCard(
                     title: 'Total Roster',
@@ -449,7 +466,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     iconColor: AppColors.success,
                     trend: '$regularInt Regular',
                     isTrendUp: true,
-                    trendDescription: visitorInt > 0 ? '$visitorInt Visitor passes issued' : 'All registered members',
+                    trendDescription: visitorInt > 0
+                        ? '$visitorInt Visitor passes issued'
+                        : (totalInt > 0 ? 'All registered members' : 'No registered members yet'),
                   ),
                 ],
               );

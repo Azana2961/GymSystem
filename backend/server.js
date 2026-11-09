@@ -76,8 +76,21 @@ realWhatsAppManager.setBroadcaster(broadcast);
 
 // ── WebSocket Connection Handler ──────────────────────────────────────────
 wss.on('connection', (ws, req) => {
-  const clientIp = req.socket.remoteAddress;
+  const clientIp = (req.socket.remoteAddress || '').replace(/^.*:/, '');
   console.log(`[WS] Client connected from ${clientIp}`);
+
+  // Automatically record this tablet connection in database so PC dashboard detects it instantly
+  try {
+    db.upsertTabletDevice({
+      device_id: 'tablet-' + (clientIp || 'client'),
+      device_name: 'Lá Fitness Kiosk',
+      ip_address: clientIp || '127.0.0.1',
+      battery_level: 100,
+      app_version: '2.2.0',
+    });
+  } catch (_) {}
+
+  broadcast('tablet:connected', { ip: clientIp, timestamp: new Date().toISOString() });
 
   // Send initial state on connection
   ws.send(JSON.stringify({
@@ -154,6 +167,17 @@ app.get('/api/health', (req, res) => {
 
 // Fast ping probe specifically designed for Tablet "Test Connection" button
 app.get('/api/ping', (req, res) => {
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').replace(/^.*:/, '');
+  try {
+    db.upsertTabletDevice({
+      device_id: 'tablet-' + (ip || 'client'),
+      device_name: 'Lá Fitness Kiosk',
+      ip_address: ip || '127.0.0.1',
+      battery_level: 100,
+      app_version: '2.2.0-adaptive',
+    });
+  } catch (_) {}
+
   const ips = getLocalIpAddresses();
   res.json({
     success: true,
@@ -269,18 +293,19 @@ app.get('/api/tablet/devices', (req, res) => {
       const timeStr = d.last_seen.includes('T') ? d.last_seen : d.last_seen.replace(' ', 'T') + 'Z';
       lastSeenMs = new Date(timeStr).getTime();
     }
-    const isOnline = (now - lastSeenMs) < 65000; // seen within 65s (heartbeat is 25s)
+    const isOnline = (now - lastSeenMs) < 90000; // seen within 90s
     return {
       ...d,
       is_online: isOnline,
     };
   });
-  const hasConnectedTablet = enriched.some((d) => d.is_online);
+  const hasWsClients = Boolean(wss.clients && wss.clients.size > 0);
+  const hasConnectedTablet = enriched.some((d) => d.is_online) || hasWsClients;
   res.json({
     success: true,
     devices: enriched,
     hasConnectedTablet,
-    connectedCount: enriched.filter((d) => d.is_online).length,
+    connectedCount: Math.max(enriched.filter((d) => d.is_online).length, hasWsClients ? 1 : 0),
   });
 });
 
@@ -641,7 +666,7 @@ app.put('/api/members/:id', (req, res) => {
       ? Number(req.body.due_amount) || 0
       : Number(existing.due_amount || 0);
     const paidAmt = req.body.paid_amount !== undefined
-      ? (Number(existing.paid_amount || 0) + (Number(req.body.paid_amount) || 0))
+      ? (Number(req.body.paid_amount) || 0)
       : Number(existing.paid_amount || 0);
 
     let resolvedStatus = req.body.status ?? existing.status;
@@ -675,7 +700,7 @@ app.put('/api/members/:id', (req, res) => {
     if (req.body.send_receipt && updated.phone) {
       try {
         whatsappService.sendPaymentReceipt(updated, {
-          amount: req.body.paid_amount || '0',
+          amount: req.body.receipt_amount || req.body.paid_amount || '0',
           method: req.body.payment_method || 'Cash',
         });
       } catch (e) {}
@@ -702,7 +727,7 @@ app.delete('/api/members/:id', (req, res) => {
 
 // ── 5. Attendance Feed & Statistics ───────────────────────────────────────
 app.get('/api/attendance/feed', (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
   const feed = db.getRecentAttendance(limit);
   res.json({ success: true, count: feed.length, feed });
 });
@@ -824,8 +849,8 @@ app.get('/api/whatsapp/logs', (req, res) => {
 app.post('/api/whatsapp/send', (req, res) => {
   try {
     const { member_id, phone, text, type, image_base64, image_path } = req.body;
-    if (!phone || (!text && !image_base64 && !image_path)) {
-      return res.status(400).json({ success: false, message: 'phone and either text or image are required' });
+    if (!phone || (!text && !image_base64 && !image_path && !member_id)) {
+      return res.status(400).json({ success: false, message: 'phone and either text, image, or member_id are required' });
     }
 
     const item = whatsappService.enqueue({
@@ -943,21 +968,35 @@ app.get('/api/whatsapp/real/status', (req, res) => {
 });
 
 // Get latest QR code (Data URL & raw string) for phone pairing
-app.get('/api/whatsapp/real/qr', (req, res) => {
-  res.json({
-    success: true,
-    ...realWhatsAppManager.getStatus(),
-  });
+app.get('/api/whatsapp/real/qr', async (req, res) => {
+  try {
+    const forceReset = req.query.fresh === '1' || req.query.force === '1';
+    if (forceReset) {
+      await realWhatsAppManager.startFreshQrSession(true);
+    } else if (
+      realWhatsAppManager.status === 'disconnected' &&
+      !realWhatsAppManager.isInitializing
+    ) {
+      await realWhatsAppManager.startFreshQrSession(false);
+    }
+    res.json({
+      success: true,
+      ...realWhatsAppManager.getStatus(),
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Reconnect or manually initialize Real WhatsApp socket
 app.post('/api/whatsapp/real/start', async (req, res) => {
   try {
-    await realWhatsAppManager.init();
+    const forceReset = Boolean(req.body && req.body.forceReset);
+    const status = await realWhatsAppManager.startFreshQrSession(forceReset);
     res.json({
       success: true,
       message: 'WhatsApp Web initialization triggered',
-      status: realWhatsAppManager.getStatus(),
+      status,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -1022,9 +1061,9 @@ app.post('/api/whatsapp/send-real', async (req, res) => {
   }
 });
 
-// ── Startup & Seed ────────────────────────────────────────────────────────
+// ── Startup & Server Launch ───────────────────────────────────────────────
 async function start() {
-  await seed();
+  // Production mode: start with clean database (no dummy seeding)
 
   server.listen(PORT, '0.0.0.0', () => {
     const ips = getLocalIpAddresses();

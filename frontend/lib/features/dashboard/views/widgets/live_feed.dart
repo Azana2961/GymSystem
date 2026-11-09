@@ -7,6 +7,7 @@ import 'package:gym_system/core/constants/app_settings.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/features/dashboard/models/attendance_model.dart';
 import 'package:gym_system/features/members/models/member_model.dart';
+import 'package:gym_system/features/members/providers/members_provider.dart';
 import 'package:gym_system/core/services/api_service.dart';
 import 'collect_payment_dialog.dart';
 
@@ -28,13 +29,19 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
   void initState() {
     super.initState();
     _feed = [];
+    MembersProvider.instance.addListener(_onMembersChanged);
     _fetchLiveFeed();
     // Poll every 2 seconds for real-time tablet attendance updates
     _poller = Timer.periodic(const Duration(seconds: 2), (_) => _fetchLiveFeed());
   }
 
+  void _onMembersChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    MembersProvider.instance.removeListener(_onMembersChanged);
     _poller?.cancel();
     super.dispose();
   }
@@ -110,275 +117,335 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
         '${item.checkInTime.hour.toString().padLeft(2, '0')}:${item.checkInTime.minute.toString().padLeft(2, '0')}';
 
     final cat = item.category;
-    final Color accentColor = cat == 'expired'
-        ? AppColors.error
-        : (cat == 'due'
-            ? AppColors.warning
-            : (cat == 'visitor' ? _visitorColor : AppColors.success));
-
-    final String statusLabel = cat == 'expired'
-        ? 'MEMBERSHIP EXPIRED'
-        : (cat == 'due'
-            ? 'UDHAAR / PAYMENT DUE'
-            : (cat == 'visitor' ? 'VISITOR GUEST PASS' : 'ACTIVE REGULAR MEMBER'));
 
     showDialog(
       context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: accentColor.withValues(alpha: 0.6), width: 1.5),
-        ),
-        child: Container(
-          width: 420,
-          padding: const EdgeInsets.all(22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Top Bar: Status Badge + Close Button
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      builder: (ctx) => AnimatedBuilder(
+        animation: MembersProvider.instance,
+        builder: (ctx, _) {
+          final liveMember = MembersProvider.instance.allMembers
+                  .where((m) => m.id == item.member.id)
+                  .firstOrNull ??
+              item.member;
+          final bool isVisitor = liveMember.isVisitor || cat == 'visitor';
+          final bool isAlreadyPaid = !isVisitor &&
+              !liveMember.isExpired &&
+              !liveMember.isPaymentPending &&
+              liveMember.dueAmount <= 0;
+
+          final Color accentColor = isAlreadyPaid
+              ? AppColors.success
+              : (cat == 'expired' || liveMember.isExpired
+                  ? AppColors.error
+                  : (cat == 'due' || liveMember.dueAmount > 0
+                      ? AppColors.warning
+                      : (isVisitor ? _visitorColor : AppColors.success)));
+
+          final String statusLabel = isAlreadyPaid && (cat == 'expired' || cat == 'due')
+              ? 'THIS MONTH FEE PAID'
+              : (cat == 'expired'
+                  ? 'MEMBERSHIP EXPIRED'
+                  : (cat == 'due'
+                      ? 'UDHAAR / PAYMENT DUE'
+                      : (isVisitor ? 'VISITOR GUEST PASS' : 'ACTIVE REGULAR MEMBER')));
+
+          return Dialog(
+            backgroundColor: AppColors.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: accentColor.withValues(alpha: 0.6), width: 1.5),
+            ),
+            child: Container(
+              width: 420,
+              padding: const EdgeInsets.all(22),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: accentColor.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: accentColor.withValues(alpha: 0.6)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          cat == 'expired'
-                              ? Icons.error_rounded
-                              : (cat == 'due'
-                                  ? Icons.warning_rounded
-                                  : (cat == 'visitor' ? Icons.badge_rounded : Icons.check_circle_rounded)),
-                          color: accentColor,
-                          size: 14,
+                  // Top Bar: Status Badge + Close Button
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: accentColor.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: accentColor.withValues(alpha: 0.6)),
                         ),
-                        const SizedBox(width: 6),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              isAlreadyPaid
+                                  ? Icons.check_circle_rounded
+                                  : (cat == 'expired'
+                                      ? Icons.error_rounded
+                                      : (cat == 'due'
+                                          ? Icons.warning_rounded
+                                          : (isVisitor ? Icons.badge_rounded : Icons.check_circle_rounded))),
+                              color: accentColor,
+                              size: 14,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              statusLabel,
+                              style: TextStyle(
+                                color: accentColor,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 11,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: const Icon(Icons.close_rounded, size: 20, color: AppColors.textMuted),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Avatar / Photo Snapshot Section
+                  Center(
+                    child: hasPhoto && resolved != null
+                        ? Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(color: accentColor, width: 2),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: accentColor.withValues(alpha: 0.25),
+                                  blurRadius: 16,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: resolved.startsWith('data:image')
+                                  ? Image.memory(
+                                      base64Decode(resolved.split(',').last),
+                                      height: 220,
+                                      width: double.infinity,
+                                      fit: BoxFit.cover,
+                                    )
+                                  : Image.network(
+                                      resolved,
+                                      height: 220,
+                                      width: double.infinity,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, _, _) => Container(
+                                        height: 160,
+                                        color: AppColors.surfaceLight,
+                                        alignment: Alignment.center,
+                                        child: const Icon(Icons.broken_image_rounded, color: AppColors.textMuted, size: 40),
+                                      ),
+                                    ),
+                            ),
+                          )
+                        : Container(
+                            width: 90,
+                            height: 90,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: accentColor.withValues(alpha: 0.15),
+                              border: Border.all(color: accentColor, width: 2.5),
+                            ),
+                            child: Center(
+                              child: Text(
+                                liveMember.name.isNotEmpty ? liveMember.name[0].toUpperCase() : 'M',
+                                style: TextStyle(
+                                  fontSize: 36,
+                                  fontWeight: FontWeight.w900,
+                                  color: accentColor,
+                                ),
+                              ),
+                            ),
+                          ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Name & Identifier
+                  Center(
+                    child: Column(
+                      children: [
                         Text(
-                          statusLabel,
-                          style: TextStyle(
-                            color: accentColor,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 11,
-                            letterSpacing: 0.5,
+                          liveMember.name,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 20,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'ID: ${liveMember.id} • Pass: ${liveMember.qrToken ?? liveMember.id}',
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    icon: const Icon(Icons.close_rounded, size: 20, color: AppColors.textMuted),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
+                  const SizedBox(height: 16),
 
-              // Avatar / Photo Snapshot Section
-              Center(
-                child: hasPhoto && resolved != null
-                    ? Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: accentColor, width: 2),
-                          boxShadow: [
-                            BoxShadow(
-                              color: accentColor.withValues(alpha: 0.25),
-                              blurRadius: 16,
-                              spreadRadius: 2,
-                            ),
-                          ],
+                  // Member Details Grid / List Card
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                      children: [
+                        _buildProfileRow('Membership Plan', liveMember.plan, Icons.card_membership_rounded),
+                        const Divider(height: 16, color: AppColors.border),
+                        _buildProfileRow(
+                          'Expiry Date',
+                          liveMember.expiryDate.toString().split(' ').first,
+                          Icons.event_rounded,
+                          valueColor: liveMember.isExpired ? AppColors.error : AppColors.success,
                         ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: resolved.startsWith('data:image')
-                              ? Image.memory(
-                                  base64Decode(resolved.split(',').last),
-                                  height: 220,
-                                  width: double.infinity,
-                                  fit: BoxFit.cover,
-                                )
-                              : Image.network(
-                                  resolved,
-                                  height: 220,
-                                  width: double.infinity,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) => Container(
-                                    height: 160,
-                                    color: AppColors.surfaceLight,
-                                    alignment: Alignment.center,
-                                    child: const Icon(Icons.broken_image_rounded, color: AppColors.textMuted, size: 40),
-                                  ),
-                                ),
+                        const Divider(height: 16, color: AppColors.border),
+                        _buildProfileRow(
+                          'Check-in Time',
+                          'Today at $timeStr',
+                          Icons.access_time_rounded,
                         ),
-                      )
-                    : Container(
-                        width: 90,
-                        height: 90,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: accentColor.withValues(alpha: 0.15),
-                          border: Border.all(color: accentColor, width: 2.5),
-                        ),
-                        child: Center(
-                          child: Text(
-                            item.member.name.isNotEmpty ? item.member.name[0].toUpperCase() : 'M',
-                            style: TextStyle(
-                              fontSize: 36,
-                              fontWeight: FontWeight.w900,
-                              color: accentColor,
+                        if (liveMember.phone != null && liveMember.phone!.isNotEmpty) ...[
+                          const Divider(height: 16, color: AppColors.border),
+                          _buildProfileRow('Phone', liveMember.phone!, Icons.phone_rounded),
+                        ],
+                      ],
+                    ),
+                  ),
+
+                  // Outstanding Dues Alert Card if any
+                  if (liveMember.dueAmount > 0) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.warning.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.warning.withValues(alpha: 0.6)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.account_balance_wallet_rounded, color: AppColors.warning, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Outstanding Udhaar / Due: Rs. ${AppSettings.formatAmount(liveMember.dueAmount)}',
+                              style: const TextStyle(
+                                color: AppColors.warning,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-              ),
-              const SizedBox(height: 14),
-
-              // Name & Identifier
-              Center(
-                child: Column(
-                  children: [
-                    Text(
-                      item.member.name,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                        color: AppColors.textPrimary,
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'ID: ${item.member.id} • Pass: ${item.member.qrToken ?? item.member.id}',
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                  ] else if (isAlreadyPaid) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.success.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.success.withValues(alpha: 0.5)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.verified_rounded, color: AppColors.success, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'This month\'s fee is paid (Valid until ${liveMember.expiryDate.toString().split(' ').first})',
+                              style: const TextStyle(
+                                color: AppColors.success,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
-                ),
-              ),
-              const SizedBox(height: 16),
 
-              // Member Details Grid / List Card
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceLight,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Column(
-                  children: [
-                    _buildProfileRow('Membership Plan', item.member.plan, Icons.card_membership_rounded),
-                    const Divider(height: 16, color: AppColors.border),
-                    _buildProfileRow(
-                      'Expiry Date',
-                      item.member.expiryDate.toString().split(' ').first,
-                      Icons.event_rounded,
-                      valueColor: item.member.isExpired ? AppColors.error : null,
-                    ),
-                    const Divider(height: 16, color: AppColors.border),
-                    _buildProfileRow(
-                      'Check-in Time',
-                      'Today at $timeStr',
-                      Icons.access_time_rounded,
-                    ),
-                    if (item.member.phone != null && item.member.phone!.isNotEmpty) ...[
-                      const Divider(height: 16, color: AppColors.border),
-                      _buildProfileRow('Phone', item.member.phone!, Icons.phone_rounded),
-                    ],
-                  ],
-                ),
-              ),
+                  const SizedBox(height: 18),
 
-              // Outstanding Dues Alert Card if any
-              if (item.member.dueAmount > 0) ...[
-                const SizedBox(height: 12),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: AppColors.warning.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.warning.withValues(alpha: 0.6)),
-                  ),
-                  child: Row(
+                  // Bottom Action Buttons
+                  Row(
                     children: [
-                      const Icon(Icons.account_balance_wallet_rounded, color: AppColors.warning, size: 20),
-                      const SizedBox(width: 10),
                       Expanded(
-                        child: Text(
-                          'Outstanding Udhaar / Due: Rs. ${AppSettings.formatAmount(item.member.dueAmount)}',
-                          style: const TextStyle(
-                            color: AppColors.warning,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.textPrimary,
+                            side: const BorderSide(color: AppColors.border),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: const Text('Close'),
+                        ),
+                      ),
+                      if (!isVisitor) ...[
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 2,
+                          child: ElevatedButton.icon(
+                            onPressed: isAlreadyPaid
+                                ? null
+                                : () {
+                                    Navigator.pop(ctx);
+                                    showDialog(
+                                      context: context,
+                                      builder: (_) => CollectPaymentDialog(initialMember: liveMember),
+                                    );
+                                  },
+                            icon: Icon(
+                              isAlreadyPaid ? Icons.check_circle_rounded : Icons.payments_rounded,
+                              color: isAlreadyPaid ? AppColors.textMuted : Colors.black,
+                              size: 18,
+                            ),
+                            label: Text(
+                              isAlreadyPaid ? 'Fee Paid (This Month)' : 'Collect Fee / Renew',
+                              style: TextStyle(
+                                color: isAlreadyPaid ? AppColors.textMuted : Colors.black,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              disabledBackgroundColor: Colors.white.withValues(alpha: 0.1),
+                              disabledForegroundColor: AppColors.textMuted,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
-                ),
-              ],
-
-              const SizedBox(height: 18),
-
-              // Bottom Action Buttons
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.textPrimary,
-                        side: const BorderSide(color: AppColors.border),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                      child: const Text('Close'),
-                    ),
-                  ),
-                  if (item.member.isExpired || item.member.dueAmount > 0 || cat == 'expired' || cat == 'due') ...[
-                    const SizedBox(width: 10),
-                    Expanded(
-                      flex: 2,
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          showDialog(
-                            context: context,
-                            builder: (_) => CollectPaymentDialog(initialMember: item.member),
-                          );
-                        },
-                        icon: const Icon(Icons.payments_rounded, color: Colors.black, size: 18),
-                        label: const Text(
-                          'Collect Fee / Renew',
-                          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      ),
-                    ),
-                  ],
                 ],
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -449,7 +516,7 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      _connected ? 'Live Sync' : 'Offline Buffer',
+                      _connected ? 'Live Sync' : 'Offline',
                       style: TextStyle(
                         fontSize: 12,
                         color: _connected ? AppColors.success : AppColors.textSecondary,
@@ -598,6 +665,17 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
                     separatorBuilder: (_, _) => const SizedBox(height: 6),
                     itemBuilder: (context, index) {
                       final att = items[index];
+                      final liveMember = MembersProvider.instance.allMembers
+                              .where((m) => m.id == att.member.id)
+                              .firstOrNull ??
+                          att.member;
+                      final bool isVisitor = liveMember.isVisitor || att.category == 'visitor';
+                      final bool isAlreadyPaid = !isVisitor &&
+                          !liveMember.isExpired &&
+                          !liveMember.isPaymentPending &&
+                          liveMember.dueAmount <= 0;
+                      final bool wasActionable = att.category == 'due' || att.category == 'expired';
+
                       final timeStr =
                           '${att.checkInTime.hour.toString().padLeft(2, '0')}:${att.checkInTime.minute.toString().padLeft(2, '0')}';
                       final hasPhoto = att.visitorPhotoUrl != null && att.visitorPhotoUrl!.isNotEmpty;
@@ -606,25 +684,27 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
                         onTap: () => _showMemberProfileDialog(context, att),
                         borderRadius: BorderRadius.circular(9),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
                           decoration: BoxDecoration(
                             color: AppColors.surface,
                             borderRadius: BorderRadius.circular(9),
                             border: Border.all(
-                              color: hasPhoto ? color.withValues(alpha: 0.6) : color.withValues(alpha: 0.2),
+                              color: (wasActionable && isAlreadyPaid)
+                                  ? AppColors.success.withValues(alpha: 0.5)
+                                  : (hasPhoto ? color.withValues(alpha: 0.6) : color.withValues(alpha: 0.2)),
                               width: hasPhoto ? 1.5 : 1.0,
                             ),
                           ),
                           child: Row(
                             children: [
-                              _buildAvatar(att, color, hasPhoto),
-                              const SizedBox(width: 8),
+                              _buildAvatar(att, (wasActionable && isAlreadyPaid) ? AppColors.success : color, hasPhoto),
+                              const SizedBox(width: 6),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      att.member.name,
+                                      liveMember.name,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
@@ -635,7 +715,7 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      '$timeStr • ${att.member.id}',
+                                      '$timeStr • ${liveMember.id}',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
@@ -643,14 +723,26 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
                                         fontSize: 10.5,
                                       ),
                                     ),
-                                    if (att.member.dueAmount > 0) ...[
+                                    if (liveMember.dueAmount > 0) ...[
                                       const SizedBox(height: 2),
                                       Text(
-                                        'Udhaar: Rs. ${AppSettings.formatAmount(att.member.dueAmount)}',
+                                        'Udhaar: Rs. ${AppSettings.formatAmount(liveMember.dueAmount)}',
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
                                           color: AppColors.warning,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ] else if (wasActionable && isAlreadyPaid) ...[
+                                      const SizedBox(height: 2),
+                                      const Text(
+                                        '✓ This Month Paid',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: AppColors.success,
                                           fontSize: 10,
                                           fontWeight: FontWeight.bold,
                                         ),
@@ -662,7 +754,7 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
                                         Icon(
                                           hasPhoto ? Icons.photo_camera_rounded : Icons.person_search_rounded,
                                           size: 10,
-                                          color: color,
+                                          color: (wasActionable && isAlreadyPaid) ? AppColors.success : color,
                                         ),
                                         const SizedBox(width: 4),
                                         Expanded(
@@ -671,7 +763,7 @@ class _LiveFeedWidgetState extends State<LiveFeedWidget> {
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
-                                              color: color,
+                                              color: (wasActionable && isAlreadyPaid) ? AppColors.success : color,
                                               fontSize: 9.5,
                                               fontWeight: FontWeight.w600,
                                             ),

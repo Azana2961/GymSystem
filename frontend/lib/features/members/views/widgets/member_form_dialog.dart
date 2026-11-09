@@ -64,6 +64,17 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
       _selectedPlan = _plans.first;
       _expiryDate = _settings.calculateExpiryDate(_startDate!, _selectedPlan);
     }
+
+    // Ensure latest plan prices & settings from SQLite are loaded
+    _settings.loadFromServer(retries: 1).then((_) {
+      if (mounted) {
+        setState(() {
+          if (!_plans.contains(_selectedPlan) && _plans.isNotEmpty) {
+            _selectedPlan = _plans.first;
+          }
+        });
+      }
+    });
   }
 
   @override
@@ -139,7 +150,17 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
         return;
       }
 
-      final formattedPaid = AppSettings.formatAmount(_paidNowAmount);
+      final existingMember = widget.memberToEdit;
+      final double effectivePaid = (existingMember != null &&
+              !_isVisitor &&
+              existingMember.plan == _selectedPlan &&
+              !_includeJoiningFee &&
+              _discount == 0 &&
+              existingMember.dueAmount == _udhaarAmount &&
+              existingMember.paidAmount > 0)
+          ? existingMember.paidAmount
+          : _paidNowAmount;
+      final formattedPaid = AppSettings.formatAmount(effectivePaid);
       final formattedUdhaar = AppSettings.formatAmount(_udhaarAmount);
       final generatedToken = widget.memberToEdit?.qrToken ?? _generatePassToken(_isVisitor);
       final methodUsed = _isVisitor ? 'Free Pass' : _selectedPaymentMethod;
@@ -151,7 +172,7 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
         expiryDate: _expiryDate!,
         isPaymentPending: hasDue,
         dueAmount: _udhaarAmount,
-        paidAmount: _paidNowAmount,
+        paidAmount: effectivePaid,
         phone: _phoneController.text.trim().isNotEmpty ? _phoneController.text.trim() : null,
         email: _emailController.text.trim().isNotEmpty ? _emailController.text.trim() : null,
         startDate: _startDate,
@@ -166,22 +187,25 @@ class _MemberFormDialogState extends State<MemberFormDialog> {
       );
 
       if (widget.memberToEdit != null) {
-        widget.provider.updateMember(member, paidAmount: _paidNowAmount, paymentMethod: methodUsed);
+        widget.provider.updateMember(member, paidAmount: effectivePaid, paymentMethod: methodUsed);
       } else {
         widget.provider.addMember(member, sendWelcome: false);
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.clearSnackBars();
+      messenger?.showSnackBar(
         SnackBar(
           content: Text(
             hasDue
-                ? 'Member saved with Rs. $formattedUdhaar Udhaar (Due) & synced to Kiosks!'
-                : 'Member saved & synced to all Tablet Kiosks for offline scanning!',
+                ? 'Member saved with Rs. $formattedUdhaar pending due!'
+                : 'Member saved successfully!',
           ),
           backgroundColor: hasDue ? AppColors.warning : AppColors.success,
           duration: const Duration(seconds: 3),
         ),
       );
+      Future.delayed(const Duration(seconds: 3), () => messenger?.hideCurrentSnackBar());
 
       final nav = Navigator.of(context);
       nav.pop();

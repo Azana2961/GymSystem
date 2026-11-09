@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:gym_system/core/constants/app_settings.dart';
 import 'package:gym_system/core/theme/colors.dart';
@@ -31,11 +33,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final TextEditingController _expiredTemplateCtrl = TextEditingController(text: AppSettings.instance.templateExpired);
   bool _savingTemplates = false;
   Map<String, dynamic>? _realWaStatus;
+  Timer? _waStatusPoller;
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _waStatusPoller = Timer.periodic(const Duration(seconds: 3), (_) {
+      _loadRealWaStatus();
+    });
   }
 
   @override
@@ -107,6 +113,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    _waStatusPoller?.cancel();
     _joiningFeeController.dispose();
     _newPaymentMethodCtrl.dispose();
     _dueTemplateCtrl.dispose();
@@ -344,107 +351,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _showRealWhatsAppQrDialog(BuildContext context) async {
-    showDialog(
+    await showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
-          return FutureBuilder<Map<String, dynamic>?>(
-            future: ApiService.instance.getRealWhatsAppQr(),
-            builder: (context, snapshot) {
-              final data = snapshot.data;
-              final isConnected = data?['isConnected'] == true;
-              final qrUrl = data?['qrCodeDataUrl'] as String?;
-
-              return AlertDialog(
-                backgroundColor: AppColors.surface,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: const BorderSide(color: AppColors.border),
-                ),
-                title: const Row(
-                  children: [
-                    Icon(Icons.qr_code_2_rounded, color: AppColors.primary),
-                    SizedBox(width: 10),
-                    Text('Link Real WhatsApp', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                  ],
-                ),
-                content: SizedBox(
-                  width: 320,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'Open WhatsApp on your phone → Linked Devices → Link a Device → Scan this QR code:',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
-                      ),
-                      const SizedBox(height: 16),
-                      Container(
-                        width: 240,
-                        height: 240,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: isConnected
-                            ? const Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.check_circle_rounded, color: AppColors.success, size: 64),
-                                  SizedBox(height: 8),
-                                  Text('WhatsApp Connected!', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                                ],
-                              )
-                            : (qrUrl != null && qrUrl.contains(','))
-                                ? Image.memory(
-                                    base64Decode(qrUrl.split(',')[1]),
-                                    width: 220,
-                                    height: 220,
-                                    fit: BoxFit.contain,
-                                  )
-                                : const Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      CircularProgressIndicator(strokeWidth: 3),
-                                      SizedBox(height: 12),
-                                      Text('Generating QR Code...', style: TextStyle(color: Colors.black87, fontSize: 13)),
-                                    ],
-                                  ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'This QR code refreshes automatically for your security.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 11, color: AppColors.textMuted),
-                      ),
-                    ],
-                  ),
-                ),
-                actions: [
-                  TextButton.icon(
-                    onPressed: () {
-                      setDialogState(() {});
-                      _loadRealWaStatus();
-                    },
-                    icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('Refresh'),
-                  ),
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      _loadRealWaStatus();
-                    },
-                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
-                    child: const Text('Done'),
-                  ),
-                ],
-              );
-            },
-          );
+      barrierDismissible: false,
+      builder: (ctx) => _RealWhatsAppQrDialog(
+        onStatusChanged: () {
+          _loadRealWaStatus();
         },
       ),
     );
+    await _loadRealWaStatus();
   }
 
   Future<void> _disconnectRealWhatsApp() async {
@@ -1347,6 +1263,223 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _RealWhatsAppQrDialog extends StatefulWidget {
+  final VoidCallback onStatusChanged;
+
+  const _RealWhatsAppQrDialog({required this.onStatusChanged});
+
+  @override
+  State<_RealWhatsAppQrDialog> createState() => _RealWhatsAppQrDialogState();
+}
+
+class _RealWhatsAppQrDialogState extends State<_RealWhatsAppQrDialog> {
+  Timer? _poller;
+  bool _isConnected = false;
+  bool _isRefreshing = false;
+  String? _lastQrUrl;
+  Uint8List? _qrBytes;
+  String? _connectedPhone;
+
+  @override
+  void initState() {
+    super.initState();
+    _initAndPoll();
+  }
+
+  Future<void> _initAndPoll({bool forceReset = false}) async {
+    if (forceReset && mounted) {
+      setState(() {
+        _isRefreshing = true;
+        _qrBytes = null;
+        _lastQrUrl = null;
+      });
+    }
+
+    await ApiService.instance.startRealWhatsApp(forceReset: forceReset);
+    await _fetchQrStatus();
+
+    if (mounted && _isRefreshing) {
+      setState(() => _isRefreshing = false);
+    }
+
+    _poller?.cancel();
+    _poller = Timer.periodic(const Duration(milliseconds: 1500), (_) {
+      _fetchQrStatus();
+    });
+  }
+
+  Future<void> _fetchQrStatus() async {
+    final data = await ApiService.instance.getRealWhatsAppQr();
+    if (!mounted || data == null) return;
+
+    final connected = data['isConnected'] == true;
+    final qrUrl = data['qrCodeDataUrl'] as String?;
+    final user = data['connectedUser'] as Map<String, dynamic>?;
+    final phone = user?['phone']?.toString();
+
+    Uint8List? updatedBytes = _qrBytes;
+    if (qrUrl != null && qrUrl.contains(',')) {
+      if (qrUrl != _lastQrUrl) {
+        try {
+          updatedBytes = base64Decode(qrUrl.split(',')[1]);
+        } catch (_) {}
+      }
+    } else if (!connected) {
+      updatedBytes = null;
+    }
+
+    final changed = connected != _isConnected ||
+        qrUrl != _lastQrUrl ||
+        phone != _connectedPhone;
+
+    if (changed) {
+      setState(() {
+        _isConnected = connected;
+        _lastQrUrl = qrUrl;
+        _qrBytes = updatedBytes;
+        _connectedPhone = phone;
+      });
+      widget.onStatusChanged();
+    }
+  }
+
+  @override
+  void dispose() {
+    _poller?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AppColors.border),
+      ),
+      title: const Row(
+        children: [
+          Icon(Icons.qr_code_2_rounded, color: AppColors.primary),
+          SizedBox(width: 10),
+          Text(
+            'Link Real WhatsApp',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 340,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Open WhatsApp on your phone → Linked Devices → Link a Device → Scan this QR code:',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: 268,
+              height: 268,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: _isConnected
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.check_circle_rounded,
+                          color: AppColors.success,
+                          size: 64,
+                        ),
+                        const SizedBox(height: 10),
+                        const Text(
+                          'WhatsApp Connected!',
+                          style: TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        if (_connectedPhone != null && _connectedPhone!.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            '+$_connectedPhone',
+                            style: const TextStyle(
+                              color: Colors.black54,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ],
+                    )
+                  : (_qrBytes != null && !_isRefreshing)
+                      ? Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Image.memory(
+                            _qrBytes!,
+                            width: 250,
+                            height: 250,
+                            fit: BoxFit.contain,
+                            filterQuality: FilterQuality.none,
+                            gaplessPlayback: true,
+                          ),
+                        )
+                      : const Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(strokeWidth: 3),
+                            SizedBox(height: 12),
+                            Text(
+                              'Generating Fresh QR Code...',
+                              style: TextStyle(color: Colors.black87, fontSize: 13),
+                            ),
+                          ],
+                        ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _isConnected
+                  ? 'Session is saved permanently and will stay connected automatically.'
+                  : 'Live QR code updates automatically every 20 seconds.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        if (!_isConnected)
+          TextButton.icon(
+            onPressed: _isRefreshing
+                ? null
+                : () => _initAndPoll(forceReset: true),
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('New QR'),
+          ),
+        ElevatedButton(
+          onPressed: () {
+            Navigator.pop(context);
+            widget.onStatusChanged();
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.black,
+          ),
+          child: const Text(
+            'Done',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ),
+      ],
     );
   }
 }

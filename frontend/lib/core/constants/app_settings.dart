@@ -173,67 +173,80 @@ class AppSettings extends ChangeNotifier {
   }
 
   /// Loads persisted toggles, plans, payment methods, and templates from SQLite backend
-  Future<void> loadFromServer() async {
-    try {
-      final s = await ApiService.instance.getWhatsAppSettings();
-      if (s == null) return;
+  Future<void> loadFromServer({int retries = 4}) async {
+    for (int attempt = 0; attempt <= retries; attempt++) {
+      try {
+        final s = await ApiService.instance.getWhatsAppSettings();
+        if (s == null) {
+          if (attempt < retries) {
+            await Future.delayed(const Duration(milliseconds: 700));
+            continue;
+          }
+          return;
+        }
 
-      if (s['enable_joining_fee'] != null) {
-        enableJoiningFee = s['enable_joining_fee'].toString() == 'true';
+        if (s['enable_joining_fee'] != null) {
+          enableJoiningFee = s['enable_joining_fee'].toString() == 'true';
+        }
+        if (s['joining_fee_amount'] != null) {
+          final parsed = double.tryParse(s['joining_fee_amount'].toString());
+          if (parsed != null && parsed >= 0) joiningFeeAmount = parsed;
+        }
+        if (s['plans_json'] != null && s['plans_json'].toString().isNotEmpty) {
+          try {
+            final decoded = jsonDecode(s['plans_json'].toString()) as List<dynamic>;
+            if (decoded.isNotEmpty) {
+              plans = decoded
+                  .map((item) =>
+                      MembershipPlanConfig.fromJson(item as Map<String, dynamic>))
+                  .toList();
+            }
+          } catch (_) {}
+        }
+        if (s['payment_methods_json'] != null &&
+            s['payment_methods_json'].toString().isNotEmpty) {
+          try {
+            final decoded =
+                jsonDecode(s['payment_methods_json'].toString()) as List<dynamic>;
+            final loadedMethods =
+                decoded.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+            if (loadedMethods.isNotEmpty) {
+              paymentMethods = loadedMethods;
+            }
+          } catch (_) {}
+        }
+        if (s['enable_expiry_alerts'] != null) {
+          sendExpiryAlert = s['enable_expiry_alerts'].toString() == 'true';
+        }
+        if (s['enable_payment_receipts'] != null) {
+          sendPaymentReceipt = s['enable_payment_receipts'].toString() == 'true';
+        }
+        if (s['enable_welcome_msg'] != null) {
+          sendWelcomeMessage = s['enable_welcome_msg'].toString() == 'true';
+        }
+        if (s['template_welcome'] != null &&
+            s['template_welcome'].toString().isNotEmpty) {
+          templateWelcome = s['template_welcome'].toString();
+        }
+        if (s['template_due'] != null && s['template_due'].toString().isNotEmpty) {
+          templateDue = s['template_due'].toString();
+        }
+        if (s['template_expired'] != null &&
+            s['template_expired'].toString().isNotEmpty) {
+          templateExpired = s['template_expired'].toString();
+        }
+        if (s['template_receipt'] != null &&
+            s['template_receipt'].toString().isNotEmpty) {
+          templateReceipt = s['template_receipt'].toString();
+        }
+        notifyListeners();
+        return;
+      } catch (_) {
+        if (attempt < retries) {
+          await Future.delayed(const Duration(milliseconds: 700));
+        }
       }
-      if (s['joining_fee_amount'] != null) {
-        final parsed = double.tryParse(s['joining_fee_amount'].toString());
-        if (parsed != null && parsed >= 0) joiningFeeAmount = parsed;
-      }
-      if (s['plans_json'] != null && s['plans_json'].toString().isNotEmpty) {
-        try {
-          final decoded = jsonDecode(s['plans_json'].toString()) as List<dynamic>;
-          if (decoded.isNotEmpty) {
-            plans = decoded
-                .map((item) =>
-                    MembershipPlanConfig.fromJson(item as Map<String, dynamic>))
-                .toList();
-          }
-        } catch (_) {}
-      }
-      if (s['payment_methods_json'] != null &&
-          s['payment_methods_json'].toString().isNotEmpty) {
-        try {
-          final decoded =
-              jsonDecode(s['payment_methods_json'].toString()) as List<dynamic>;
-          final loadedMethods =
-              decoded.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
-          if (loadedMethods.isNotEmpty) {
-            paymentMethods = loadedMethods;
-          }
-        } catch (_) {}
-      }
-      if (s['enable_expiry_alerts'] != null) {
-        sendExpiryAlert = s['enable_expiry_alerts'].toString() == 'true';
-      }
-      if (s['enable_payment_receipts'] != null) {
-        sendPaymentReceipt = s['enable_payment_receipts'].toString() == 'true';
-      }
-      if (s['enable_welcome_msg'] != null) {
-        sendWelcomeMessage = s['enable_welcome_msg'].toString() == 'true';
-      }
-      if (s['template_welcome'] != null &&
-          s['template_welcome'].toString().isNotEmpty) {
-        templateWelcome = s['template_welcome'].toString();
-      }
-      if (s['template_due'] != null && s['template_due'].toString().isNotEmpty) {
-        templateDue = s['template_due'].toString();
-      }
-      if (s['template_expired'] != null &&
-          s['template_expired'].toString().isNotEmpty) {
-        templateExpired = s['template_expired'].toString();
-      }
-      if (s['template_receipt'] != null &&
-          s['template_receipt'].toString().isNotEmpty) {
-        templateReceipt = s['template_receipt'].toString();
-      }
-      notifyListeners();
-    } catch (_) {}
+    }
   }
 
   void resetTemplatesToDefault() {

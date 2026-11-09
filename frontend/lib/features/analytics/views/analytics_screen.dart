@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:gym_system/core/constants/app_settings.dart';
+import 'package:gym_system/core/services/api_service.dart';
 import 'package:gym_system/core/services/export_service.dart';
 import 'package:gym_system/core/theme/colors.dart';
 import 'package:gym_system/features/analytics/models/analytics_data.dart';
@@ -16,18 +18,63 @@ class AnalyticsScreen extends StatefulWidget {
 }
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
-  String _selectedMonth = 'October 2026';
+  String _selectedMonth = AnalyticsRepository.availableMonths.first;
   final MembersProvider _membersProvider = MembersProvider.instance;
   bool _isExporting = false;
   String _exportingType = '';
+  List<Map<String, dynamic>> _attendanceFeed = [];
+  int _todayCheckins = 0;
+  Timer? _poller;
 
-  MonthlyAnalyticsReport get _report => AnalyticsRepository.getReport(_selectedMonth);
+  MonthlyAnalyticsReport get _report => AnalyticsRepository.getReport(
+        _selectedMonth,
+        liveMembers: _membersProvider.allMembers,
+        attendanceFeed: _attendanceFeed,
+        todayCheckins: _todayCheckins,
+      );
 
   @override
   void initState() {
     super.initState();
     _membersProvider.addListener(_onDataChanged);
     AppSettings.instance.addListener(_onDataChanged);
+    _fetchLiveAnalyticsData();
+    _poller = Timer.periodic(const Duration(seconds: 4), (_) {
+      _fetchLiveAnalyticsData();
+    });
+  }
+
+  Future<void> _fetchLiveAnalyticsData() async {
+    try {
+      await _settingsLoadHelper();
+      final results = await Future.wait([
+        ApiService.instance.getAttendanceFeed(limit: 500),
+        ApiService.instance.getStats(),
+        ApiService.instance.getMembers(),
+      ]);
+      if (!mounted) return;
+      final feed = results[0] as List<Map<String, dynamic>>;
+      final stats = results[1] as Map<String, dynamic>?;
+      final freshMembers = results[2] as List<MemberModel>;
+      final todayCount = (stats?['todayCheckins'] as num?)?.toInt() ?? 0;
+      if (freshMembers.length != _membersProvider.allMembers.length ||
+          freshMembers.any((m) {
+            final match = _membersProvider.allMembers.where((x) => x.id == m.id).firstOrNull;
+            return match == null || match.paidAmount != m.paidAmount || match.dueAmount != m.dueAmount;
+          })) {
+        await _membersProvider.refresh();
+      }
+      setState(() {
+        _attendanceFeed = feed;
+        _todayCheckins = todayCount;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _settingsLoadHelper() async {
+    try {
+      await AppSettings.instance.loadFromServer(retries: 0);
+    } catch (_) {}
   }
 
   void _onDataChanged() {
@@ -36,6 +83,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   @override
   void dispose() {
+    _poller?.cancel();
     _membersProvider.removeListener(_onDataChanged);
     AppSettings.instance.removeListener(_onDataChanged);
     super.dispose();
@@ -148,11 +196,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         _exportingType = '';
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.clearSnackBars();
+      messenger?.showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF1B1B20),
           behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 5),
+          duration: const Duration(seconds: 4),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
             side: BorderSide(
@@ -203,33 +253,37 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           ),
         ),
       );
+      Future.delayed(const Duration(seconds: 4), () => messenger?.hideCurrentSnackBar());
     } catch (e) {
       if (mounted) {
         setState(() {
           _isExporting = false;
           _exportingType = '';
         });
-        ScaffoldMessenger.of(context).showSnackBar(
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger?.clearSnackBars();
+        messenger?.showSnackBar(
           SnackBar(
             backgroundColor: AppColors.error,
+            duration: const Duration(seconds: 3),
             content: Text('Export failed: $e'),
           ),
         );
+        Future.delayed(const Duration(seconds: 3), () => messenger?.hideCurrentSnackBar());
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final months = AnalyticsRepository.availableMonths;
+    if (!months.contains(_selectedMonth)) {
+      _selectedMonth = months.first;
+    }
     final report = _report;
     final udhaarList = _getCombinedUdhaarList(report);
     final totalUdhaar = _getLiveTotalUdhaar(udhaarList);
-
-    // Add live collected payments from SQLite members on top of historical report for October 2026
-    final livePaidBonus = _selectedMonth == 'October 2026'
-        ? _membersProvider.allMembers.fold<double>(0.0, (s, m) => s + m.paidAmount)
-        : 0.0;
-    final effectiveRevenue = report.totalRevenue + livePaidBonus;
+    final effectiveRevenue = report.totalRevenue;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 24.0),
@@ -418,16 +472,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     trend: report.revenueTrend,
                     isTrendUp: report.isRevenueUp,
                     subtitle:
-                        'Base Rs. ${AppSettings.formatAmount(report.baseMembershipRevenue + livePaidBonus)} + PT Rs. ${AppSettings.formatAmount(report.joiningAndPtRevenue)}',
+                        'Base Rs. ${AppSettings.formatAmount(report.baseMembershipRevenue)} + Joining Rs. ${AppSettings.formatAmount(report.joiningAndPtRevenue)}',
                   ),
                   _buildMetricCard(
                     title: 'Active Members',
-                    value: '${report.activeMembers} Members',
+                    value: '${_membersProvider.activeMembersCount} Members',
                     icon: Icons.people_alt_rounded,
                     iconColor: AppColors.success,
-                    trend: '+${report.newSignups} Sign-ups',
+                    trend: 'Total ${_membersProvider.totalMembersCount} Roster',
                     isTrendUp: true,
-                    subtitle: '${udhaarList.length} Udhaar / due accounts',
+                    subtitle: '${_membersProvider.expiredMembersCount} Expired • ${udhaarList.length} Udhaar',
                   ),
                   _buildMetricCard(
                     title: 'Pending Dues (Udhaar)',
@@ -445,7 +499,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     iconColor: const Color(0xFF42A5F5),
                     trend: '${AppSettings.formatAmount(report.totalCheckins)} Total',
                     isTrendUp: true,
-                    subtitle: 'Peak hours: 5:00 PM - 9:00 PM',
+                    subtitle: report.totalCheckins > 0
+                        ? 'Live kiosk check-in activity'
+                        : 'No kiosk scans recorded yet',
                   ),
                 ],
               );
@@ -497,26 +553,27 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     double effectiveRevenue,
     double totalUdhaar,
   ) {
-    final count = report.historyMonths.length;
-    final startIndex = (count >= 5) ? count - 5 : 0;
-    final compareMonths = report.historyMonths.sublist(startIndex);
-    final compareBase = List<double>.from(report.historyBaseRevenue.sublist(startIndex));
-    final comparePt = List<double>.from(report.historyPtRevenue.sublist(startIndex));
+    final compareMonths = report.historyMonths;
+    final compareBase = List<double>.from(report.historyBaseRevenue);
+    final comparePt = List<double>.from(report.historyPtRevenue);
+    final activeWeekIdx = ((DateTime.now().day - 1) ~/ 7).clamp(
+      0,
+      compareMonths.isEmpty ? 0 : compareMonths.length - 1,
+    );
 
-    if (compareBase.isNotEmpty) {
-      final extra = effectiveRevenue - report.totalRevenue;
-      if (extra > 0) {
-        compareBase[compareBase.length - 1] += extra;
-      }
-    }
-
-    double prevTotal = 0;
-    if (compareBase.length >= 2) {
-      prevTotal = compareBase[compareBase.length - 2] + comparePt[comparePt.length - 2];
-    }
     final curTotal = effectiveRevenue;
-    final diff = curTotal - prevTotal;
-    final growthPct = prevTotal > 0 ? ((diff / prevTotal) * 100).toStringAsFixed(1) : '12.8';
+    final baseTotal = report.baseMembershipRevenue;
+    final joiningTotal = report.joiningAndPtRevenue;
+
+    double maxCombinedK = 0.0;
+    for (int i = 0; i < compareBase.length; i++) {
+      final totalK = (compareBase[i] + comparePt[i]) / 1000.0;
+      if (totalK > maxCombinedK) maxCombinedK = totalK;
+    }
+    final double chartMaxY = maxCombinedK <= 0
+        ? 25.0
+        : ((maxCombinedK * 1.25) / 5.0).ceil() * 5.0;
+    final double chartInterval = (chartMaxY / 5.0).clamp(1.0, 2000.0);
 
     final paymentEntries = report.paymentMethods.entries.toList();
     final channelColors = [
@@ -541,17 +598,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Column(
+                Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       'Revenue Performance & Channel Breakdown',
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                     ),
-                    SizedBox(height: 4),
+                    const SizedBox(height: 4),
                     Text(
-                      'Monthly revenue trajectory, fee stream split, and payment collection channels',
-                      style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                      'Weekly revenue progression & fee breakdown for ${report.monthLabel}',
+                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
                     ),
                   ],
                 ),
@@ -564,10 +621,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.trending_up_rounded, color: AppColors.success, size: 16),
+                      const Icon(Icons.bolt_rounded, color: AppColors.success, size: 16),
                       const SizedBox(width: 5),
                       Text(
-                        '+$growthPct% Revenue Growth',
+                        '${report.revenueTrend} • This Month',
                         style: const TextStyle(color: AppColors.success, fontSize: 12, fontWeight: FontWeight.bold),
                       ),
                     ],
@@ -577,7 +634,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             ),
             const SizedBox(height: 18),
 
-            // 4 Revenue KPI Strip Badges
+            // 4 Revenue KPI Strip Badges (100% Current Month Live DB Data)
             Row(
               children: [
                 _buildGrowthStatBadge(
@@ -587,15 +644,15 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 ),
                 const SizedBox(width: 10),
                 _buildGrowthStatBadge(
-                  'Previous Month',
-                  'Rs. ${AppSettings.formatAmount(prevTotal)}',
-                  AppColors.textSecondary,
+                  'Base Memberships',
+                  'Rs. ${AppSettings.formatAmount(baseTotal)}',
+                  AppColors.success,
                 ),
                 const SizedBox(width: 10),
                 _buildGrowthStatBadge(
-                  'Net Gain',
-                  '${diff >= 0 ? '+' : '-'}Rs. ${AppSettings.formatAmount(diff.abs())}',
-                  diff >= 0 ? AppColors.success : AppColors.error,
+                  'Joining / Extra Fee',
+                  'Rs. ${AppSettings.formatAmount(joiningTotal)}',
+                  const Color(0xFF42A5F5),
                 ),
                 const SizedBox(width: 10),
                 _buildGrowthStatBadge(
@@ -607,24 +664,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             ),
             const SizedBox(height: 22),
 
-            // Bar Chart: Monthly Revenue Trajectory
+            // Bar Chart: This Month Weekly Revenue Progression
             SizedBox(
               height: 210,
               child: BarChart(
                 BarChartData(
                   alignment: BarChartAlignment.spaceAround,
-                  maxY: 600,
+                  maxY: chartMaxY,
                   minY: 0,
                   barTouchData: BarTouchData(
                     enabled: true,
                     touchTooltipData: BarTouchTooltipData(
                       getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                        final mName = compareMonths[groupIndex];
-                        final isCurrent = groupIndex == compareMonths.length - 1;
-                        final total = rod.toY.toInt();
+                        final wName = compareMonths[groupIndex];
+                        final isCurrent = groupIndex == activeWeekIdx;
+                        final baseRs = compareBase[groupIndex];
+                        final joinRs = comparePt[groupIndex];
+                        final totalRs = baseRs + joinRs;
                         return BarTooltipItem(
-                          '$mName ${isCurrent ? "(Current)" : ""}\nRs. ${total}k Collected',
-                          const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                          '$wName ${isCurrent ? "(Active Week)" : ""}\n'
+                          'Total: Rs. ${AppSettings.formatAmount(totalRs)}\n'
+                          'Base: Rs. ${AppSettings.formatAmount(baseRs)} • Joining: Rs. ${AppSettings.formatAmount(joinRs)}',
+                          const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11.5),
                         );
                       },
                     ),
@@ -637,15 +698,15 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         getTitlesWidget: (double value, TitleMeta meta) {
                           final idx = value.toInt();
                           if (idx >= 0 && idx < compareMonths.length) {
-                            final isCurrent = idx == compareMonths.length - 1;
+                            final isCurrent = idx == activeWeekIdx;
                             return Padding(
                               padding: const EdgeInsets.only(top: 8.0),
                               child: Text(
-                                isCurrent ? '${compareMonths[idx]} (Current)' : compareMonths[idx],
+                                compareMonths[idx],
                                 style: TextStyle(
                                   color: isCurrent ? AppColors.primary : AppColors.textSecondary,
                                   fontWeight: isCurrent ? FontWeight.bold : FontWeight.w600,
-                                  fontSize: 12,
+                                  fontSize: 11.5,
                                 ),
                               ),
                             );
@@ -658,11 +719,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 55,
-                        interval: 100,
+                        interval: chartInterval,
                         getTitlesWidget: (value, meta) {
-                          if (value % 100 != 0 || value == 0) return const SizedBox();
+                          if (value == 0) return const SizedBox();
+                          final label = value == value.roundToDouble()
+                              ? 'Rs. ${value.toInt()}k'
+                              : 'Rs. ${value.toStringAsFixed(1)}k';
                           return Text(
-                            'Rs. ${value.toInt()}k',
+                            label,
                             style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
                           );
                         },
@@ -674,20 +738,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   gridData: FlGridData(
                     show: true,
                     drawVerticalLine: false,
-                    horizontalInterval: 100,
+                    horizontalInterval: chartInterval,
                     getDrawingHorizontalLine: (value) => const FlLine(color: AppColors.border, strokeWidth: 1),
                   ),
                   borderData: FlBorderData(show: false),
                   barGroups: List.generate(compareMonths.length, (i) {
                     final baseK = (compareBase[i] / 1000).toDouble();
                     final ptK = (comparePt[i] / 1000).toDouble();
-                    final isCurrent = i == compareMonths.length - 1;
+                    final isCurrent = i == activeWeekIdx;
 
                     return BarChartGroupData(
                       x: i,
                       barRods: [
                         BarChartRodData(
-                          toY: (baseK + ptK).clamp(0, 590),
+                          toY: (baseK + ptK).clamp(0, chartMaxY),
                           width: 34,
                           borderRadius: BorderRadius.circular(6),
                           borderSide: isCurrent
@@ -697,14 +761,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             BarChartRodStackItem(
                               0,
                               baseK,
-                              isCurrent ? AppColors.primary : AppColors.primary.withValues(alpha: 0.65),
+                              isCurrent ? AppColors.primary : AppColors.primary.withValues(alpha: 0.7),
                             ),
                             BarChartRodStackItem(
                               baseK,
                               baseK + ptK,
                               isCurrent
                                   ? const Color(0xFF42A5F5)
-                                  : const Color(0xFF42A5F5).withValues(alpha: 0.65),
+                                  : const Color(0xFF42A5F5).withValues(alpha: 0.7),
                             ),
                           ],
                         ),
@@ -1017,10 +1081,65 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     );
   }
 
+  String _formatHour12(int h) {
+    if (h == 0) return '12am';
+    if (h < 12) return '${h}am';
+    if (h == 12) return '12pm';
+    return '${h - 12}pm';
+  }
+
   // --- PEAK HOURS HEATMAP CARD ---
   Widget _buildPeakHoursHeatmapCard() {
     final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    final hours = List.generate(18, (i) => i + 6); // 6 AM to 11 PM
+    final hours = List.generate(24, (i) => i); // All 24 hours: 12am to 11pm
+
+    // Compute live check-in counts grouped by weekday (0=Mon..6=Sun) and hour (0..23)
+    // Includes all tablet scans (members + visitors) as well as visitor pass registrations
+    final Map<String, int> slotCounts = {};
+    final Map<String, int> visitorSlotCounts = {};
+    final Set<String> scannedVisitorIds = {};
+    int maxSlotCount = 0;
+
+    for (final scan in _attendanceFeed) {
+      final rawTime =
+          scan['scanned_at'] ?? scan['scan_time'] ?? scan['timestamp'] ?? scan['created_at'] ?? '';
+      final dt = DateTime.tryParse(rawTime.toString().replaceFirst(' ', 'T'))?.toLocal();
+      if (dt != null) {
+        final dayIdx = dt.weekday - 1; // 0 = Mon, 6 = Sun
+        final h = dt.hour;
+        final key = '$dayIdx-$h';
+        final nextCount = (slotCounts[key] ?? 0) + 1;
+        slotCounts[key] = nextCount;
+        if (nextCount > maxSlotCount) {
+          maxSlotCount = nextCount;
+        }
+
+        final status = (scan['status'] ?? '').toString().toLowerCase();
+        final token = (scan['qr_token'] ?? '').toString().toUpperCase();
+        final mId = (scan['member_id'] ?? '').toString();
+        final isVis = status == 'visitor' || token.startsWith('VIS-') || mId.toUpperCase().startsWith('V');
+        if (isVis) {
+          visitorSlotCounts[key] = (visitorSlotCounts[key] ?? 0) + 1;
+          if (mId.isNotEmpty) scannedVisitorIds.add(mId);
+        }
+      }
+    }
+
+    // Also include registered Visitor Passes that haven't been scanned at the tablet yet
+    for (final m in _membersProvider.allMembers) {
+      if (m.isVisitor && !scannedVisitorIds.contains(m.id) && m.startDate != null) {
+        final dt = m.startDate!.toLocal();
+        final dayIdx = dt.weekday - 1;
+        final h = dt.hour;
+        final key = '$dayIdx-$h';
+        final nextCount = (slotCounts[key] ?? 0) + 1;
+        slotCounts[key] = nextCount;
+        visitorSlotCounts[key] = (visitorSlotCounts[key] ?? 0) + 1;
+        if (nextCount > maxSlotCount) {
+          maxSlotCount = nextCount;
+        }
+      }
+    }
 
     return Card(
       color: AppColors.surface,
@@ -1040,12 +1159,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Peak Hours & Turnstile Flow',
+                      'Peak Hours & Turnstile Flow (24-Hour)',
                       style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                     ),
                     SizedBox(height: 4),
                     Text(
-                      'Check-in volume heatmap across weekly operating hours',
+                      'Live check-in volume heatmap (Members & Visitors) across all 24 hours (12am – 11pm)',
                       style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
                     ),
                   ],
@@ -1095,19 +1214,25 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             const SizedBox(height: 20),
             LayoutBuilder(
               builder: (context, constraints) {
-                final cellWidth = (constraints.maxWidth - 50) / hours.length;
+                final cellWidth = (constraints.maxWidth - 45) / hours.length;
                 return Column(
                   children: [
                     Row(
                       children: [
-                        const SizedBox(width: 45),
+                        const SizedBox(width: 42),
                         ...hours.map((h) {
                           return SizedBox(
                             width: cellWidth,
-                            child: Text(
-                              h > 12 ? '${h - 12}p' : (h == 12 ? '12p' : '${h}a'),
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 1.0),
+                                child: Text(
+                                  _formatHour12(h),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(fontSize: 9.5, color: AppColors.textSecondary),
+                                ),
+                              ),
                             ),
                           );
                         }),
@@ -1120,7 +1245,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                         child: Row(
                           children: [
                             SizedBox(
-                              width: 45,
+                              width: 42,
                               child: Text(
                                 days[dayIdx],
                                 style: const TextStyle(
@@ -1132,33 +1257,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             ),
                             ...List.generate(hours.length, (hourIdx) {
                               final h = hours[hourIdx];
-                              double intensity = 0.1;
-                              if (h >= 17 && h <= 20) {
-                                intensity = 0.95; // Evening rush
-                              } else if (h >= 7 && h <= 9) {
-                                intensity = 0.65; // Morning rush
-                              } else if (h == 12 || h == 13) {
-                                intensity = 0.4; // Lunch
-                              }
-                              if (dayIdx >= 5) intensity *= 0.55;
-                              if (dayIdx == 0 && h == 18) intensity = 1.0;
+                              final key = '$dayIdx-$h';
+                              final count = slotCounts[key] ?? 0;
+                              final visCount = visitorSlotCounts[key] ?? 0;
+                              final double intensity = maxSlotCount > 0 ? (count / maxSlotCount) : 0.0;
 
                               Color cellColor;
-                              if (intensity < 0.2) {
+                              if (count == 0) {
                                 cellColor = AppColors.border.withValues(alpha: 0.25);
-                              } else if (intensity < 0.5) {
-                                cellColor = AppColors.primary.withValues(alpha: 0.35);
-                              } else if (intensity < 0.8) {
-                                cellColor = AppColors.primary.withValues(alpha: 0.7);
+                              } else if (intensity < 0.4) {
+                                cellColor = AppColors.primary.withValues(alpha: 0.4);
+                              } else if (intensity < 0.75) {
+                                cellColor = AppColors.primary.withValues(alpha: 0.72);
                               } else {
                                 cellColor = AppColors.primary;
                               }
 
+                              final visDetail = visCount > 0 ? ' ($visCount Visitor${visCount == 1 ? '' : 's'})' : '';
+
                               return Tooltip(
-                                message:
-                                    '${days[dayIdx]} ${h > 12 ? '${h - 12} PM' : (h == 12 ? '12 PM' : '$h AM')}: ${(intensity * 95).toInt()} Check-ins',
+                                message: '${days[dayIdx]} ${_formatHour12(h)}: $count Check-ins$visDetail',
                                 child: Container(
-                                  width: cellWidth - 2,
+                                  width: (cellWidth - 2).clamp(4.0, 200.0),
                                   height: 20,
                                   margin: const EdgeInsets.only(right: 2),
                                   decoration: BoxDecoration(
