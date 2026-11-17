@@ -15,3 +15,4 @@ A modern, full-stack Gym Management System application designed for member track
 
 - [Azana2961](https://github.com/Azana2961)
 - [warisabbas](https://github.com/warisabbas)
+- [zaidS28](https://github.com/zaidS28)
